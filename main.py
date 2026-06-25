@@ -90,17 +90,36 @@ QUERY_STUDENTS = """
     }}
 """
 
+# Обновлённый запрос с topics и disciplineGrade_V2
 QUERY_STUDENT_DISCIPLINES = """
     query {{
         searchStudentDisciplines(input: {{
             studentId: "{student_id}"
             filters: {{ studyPeriodId: "{study_period_id}" }}
         }}) {{
-            disciplineId disciplineGrade hasRetake retakeDisciplineGrade retakeScore
+            disciplineId
+            disciplineGrade
+            disciplineGrade_V2
+            scoreForAnsweredTasks
+            maxScoreForAnsweredTasks
+            hasRetake
+            retakeDisciplineGrade
+            retakeScore
+            topics {{
+                ... on StudentTopic {{
+                    status
+                    topicScore
+                    topic {{
+                        id
+                        name
+                    }}
+                }}
+            }}
         }}
     }}
 """
 
+# Обновлённый запрос для getUserById
 QUERY_USER_GRADE = """
     query {{
         getUserById(input: {{ userId: "{student_id}" }}) {{
@@ -267,6 +286,56 @@ async def get_disciplines(token: str = "", group_id: str = ""):
     return {"items": data["disciplinesByGroups"]}
 
 
+def _determine_grade_from_topics(sd: dict) -> dict:
+    """
+    Определяет оценку и наличие пересдачи через topics.
+    Логика по Алану:
+    - FAILED — явный кандидат на пересдачу
+    - IN_REVIEW — на проверке
+    - PASSED — закрыто
+    - NOT_PASSED_YET — не закрыто
+    """
+    result = {
+        "grade": "",
+        "hasRetake": False,
+        "retakeGrade": "",
+        "retakeScore": "",
+    }
+    
+    # Берём disciplineGrade_V2 как более надёжную
+    grade_v2 = sd.get("disciplineGrade_V2") or sd.get("disciplineGrade") or ""
+    if grade_v2 in GRADE_MAP:
+        result["grade"] = GRADE_MAP[grade_v2]
+    elif grade_v2:
+        result["grade"] = grade_v2
+    
+    # Анализируем topics
+    topics = sd.get("topics") or []
+    failed_count = 0
+    passed_count = 0
+    
+    for topic in topics:
+        status = topic.get("status")
+        if status == "FAILED":
+            failed_count += 1
+        elif status == "PASSED":
+            passed_count += 1
+    
+    # Если есть FAILED темы — это пересдача
+    if failed_count > 0:
+        result["hasRetake"] = True
+        # Если есть retakeDisciplineGrade, используем его
+        retake_grade = sd.get("retakeDisciplineGrade")
+        if retake_grade and retake_grade in GRADE_MAP:
+            result["retakeGrade"] = GRADE_MAP[retake_grade]
+            result["grade"] = GRADE_MAP[retake_grade]  # пересдача приоритетнее
+        elif retake_grade:
+            result["retakeGrade"] = retake_grade
+            result["grade"] = retake_grade
+    
+    return result
+
+
 @app.get("/api/students")
 async def get_students(token: str = "", group_id: str = "", disc_id: str = "", study_period_id: str = ""):
     if not token:
@@ -307,21 +376,18 @@ async def get_students(token: str = "", group_id: str = "", disc_id: str = "", s
                 sd_data = graphql(token, query3)
                 for sd in sd_data["searchStudentDisciplines"]:
                     if sd["disciplineId"] == disc_id:
-                        base["grade"] = sd.get("disciplineGrade") or ""
-                        base["hasRetake"] = sd.get("hasRetake", False)
-                        base["retakeGrade"] = sd.get("retakeDisciplineGrade") or ""
-                        base["retakeScore"] = sd.get("retakeScore") or ""
+                        # Используем новую логику через topics
+                        grade_info = _determine_grade_from_topics(sd)
+                        base.update(grade_info)
                         break
             else:
                 query4 = QUERY_USER_GRADE.format(student_id=student_id, disc_id=disc_id)
                 gdata = graphql(token, query4)
                 sd = gdata["getUserById"]["student"]["studentDiscipline"]
-                base["grade"] = (sd or {}).get("disciplineGrade") or ""
-
-            if base["hasRetake"] and base["retakeGrade"] in GRADE_MAP:
-                base["grade"] = GRADE_MAP[base["retakeGrade"]]
-            elif base["grade"] in GRADE_MAP:
-                base["grade"] = GRADE_MAP[base["grade"]]
+                if sd:
+                    # Используем новую логику через topics
+                    grade_info = _determine_grade_from_topics(sd)
+                    base.update(grade_info)
         except Exception as e:
             logger.error(f"Error fetching grade for student {student_id}: {e}")
         return base
