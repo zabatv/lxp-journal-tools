@@ -90,7 +90,6 @@ QUERY_STUDENTS = """
     }}
 """
 
-# Обновлённый запрос с topics и disciplineGrade_V2
 QUERY_STUDENT_DISCIPLINES = """
     query {{
         searchStudentDisciplines(input: {{
@@ -119,7 +118,6 @@ QUERY_STUDENT_DISCIPLINES = """
     }}
 """
 
-# Обновлённый запрос для getUserById
 QUERY_USER_GRADE = """
     query {{
         getUserById(input: {{ userId: "{student_id}" }}) {{
@@ -286,7 +284,7 @@ async def get_disciplines(token: str = "", group_id: str = ""):
     return {"items": data["disciplinesByGroups"]}
 
 
-def _determine_grade_from_topics(sd: dict) -> dict:
+def _determine_grade_from_topics(sd: dict, student_id: str = "") -> dict:
     """
     Определяет оценку и наличие пересдачи через topics.
     Логика по Алану:
@@ -302,6 +300,39 @@ def _determine_grade_from_topics(sd: dict) -> dict:
         "retakeScore": "",
     }
     
+    # Логируем сырые данные для отладки
+    logger.info(f"=== Student {student_id} ===")
+    logger.info(f"disciplineGrade: {sd.get('disciplineGrade')}")
+    logger.info(f"disciplineGrade_V2: {sd.get('disciplineGrade_V2')}")
+    logger.info(f"scoreForAnsweredTasks: {sd.get('scoreForAnsweredTasks')}")
+    logger.info(f"maxScoreForAnsweredTasks: {sd.get('maxScoreForAnsweredTasks')}")
+    logger.info(f"hasRetake: {sd.get('hasRetake')}")
+    logger.info(f"retakeDisciplineGrade: {sd.get('retakeDisciplineGrade')}")
+    
+    # Анализируем topics
+    topics = sd.get("topics") or []
+    logger.info(f"Topics count: {len(topics)}")
+    
+    failed_topics = []
+    passed_topics = []
+    other_topics = []
+    
+    for topic in topics:
+        status = topic.get("status")
+        topic_name = topic.get("topic", {}).get("name", "Unknown")
+        topic_score = topic.get("topicScore")
+        
+        if status == "FAILED":
+            failed_topics.append(f"{topic_name} (score: {topic_score})")
+        elif status == "PASSED":
+            passed_topics.append(f"{topic_name} (score: {topic_score})")
+        else:
+            other_topics.append(f"{topic_name} ({status}, score: {topic_score})")
+    
+    logger.info(f"FAILED topics: {failed_topics}")
+    logger.info(f"PASSED topics: {passed_topics}")
+    logger.info(f"Other topics: {other_topics}")
+    
     # Берём disciplineGrade_V2 как более надёжную
     grade_v2 = sd.get("disciplineGrade_V2") or sd.get("disciplineGrade") or ""
     if grade_v2 in GRADE_MAP:
@@ -309,29 +340,23 @@ def _determine_grade_from_topics(sd: dict) -> dict:
     elif grade_v2:
         result["grade"] = grade_v2
     
-    # Анализируем topics
-    topics = sd.get("topics") or []
-    failed_count = 0
-    passed_count = 0
-    
-    for topic in topics:
-        status = topic.get("status")
-        if status == "FAILED":
-            failed_count += 1
-        elif status == "PASSED":
-            passed_count += 1
-    
     # Если есть FAILED темы — это пересдача
-    if failed_count > 0:
+    if len(failed_topics) > 0:
         result["hasRetake"] = True
-        # Если есть retakeDisciplineGrade, используем его
         retake_grade = sd.get("retakeDisciplineGrade")
         if retake_grade and retake_grade in GRADE_MAP:
             result["retakeGrade"] = GRADE_MAP[retake_grade]
-            result["grade"] = GRADE_MAP[retake_grade]  # пересдача приоритетнее
+            # ВАЖНО: пересдача НЕ всегда приоритетнее
+            # Если основная оценка лучше, оставляем её
+            if result["grade"] and result["grade"] in ["4", "5"]:
+                pass  # оставляем основную оценку
+            else:
+                result["grade"] = GRADE_MAP[retake_grade]
         elif retake_grade:
             result["retakeGrade"] = retake_grade
-            result["grade"] = retake_grade
+    
+    logger.info(f"Final grade: {result['grade']}, hasRetake: {result['hasRetake']}, retakeGrade: {result['retakeGrade']}")
+    logger.info("=" * 50)
     
     return result
 
@@ -376,8 +401,7 @@ async def get_students(token: str = "", group_id: str = "", disc_id: str = "", s
                 sd_data = graphql(token, query3)
                 for sd in sd_data["searchStudentDisciplines"]:
                     if sd["disciplineId"] == disc_id:
-                        # Используем новую логику через topics
-                        grade_info = _determine_grade_from_topics(sd)
+                        grade_info = _determine_grade_from_topics(sd, student_id)
                         base.update(grade_info)
                         break
             else:
@@ -385,8 +409,7 @@ async def get_students(token: str = "", group_id: str = "", disc_id: str = "", s
                 gdata = graphql(token, query4)
                 sd = gdata["getUserById"]["student"]["studentDiscipline"]
                 if sd:
-                    # Используем новую логику через topics
-                    grade_info = _determine_grade_from_topics(sd)
+                    grade_info = _determine_grade_from_topics(sd, student_id)
                     base.update(grade_info)
         except Exception as e:
             logger.error(f"Error fetching grade for student {student_id}: {e}")
