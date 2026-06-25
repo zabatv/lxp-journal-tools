@@ -104,7 +104,24 @@ QUERY_STUDENT_DISCIPLINES = """
 QUERY_USER_GRADE = """
     query {{
         getUserById(input: {{ userId: "{student_id}" }}) {{
-            student {{ studentDiscipline(disciplineId: "{disc_id}") {{ disciplineGrade }} }}
+            student {{ 
+                studentDiscipline(disciplineId: "{disc_id}") {{ 
+                    disciplineGrade
+                    disciplineGrade_V2
+                    scoreForAnsweredTasks
+                    maxScoreForAnsweredTasks
+                    topics {{
+                        ... on StudentTopic {{
+                            status
+                            topicScore
+                            topic {{
+                                id
+                                name
+                            }}
+                        }}
+                    }}
+                }}
+            }}
         }}
     }}
 """
