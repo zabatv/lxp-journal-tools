@@ -162,7 +162,15 @@ function setStatus(msg, type) {
 
 async function apiGet(url) {
   const r = await fetch(url + '&token=' + encodeURIComponent(token));
-  if (!r.ok) { if (r.status === 401) logout(); const e = await r.json(); throw new Error(e.detail); }
+  if (!r.ok) { 
+    if (r.status === 401) logout(); 
+    try {
+      const e = await r.json(); 
+      throw new Error(e.detail);
+    } catch {
+      throw new Error(`HTTP ${r.status}`);
+    }
+  }
   return r.json();
 }
 
@@ -209,7 +217,8 @@ async function onGroupChange() {
   document.getElementById('teacherLabel').textContent = 'Преподаватель: не выбран';
   setStatus('Загрузка дисциплин...');
   try {
-    const data = await apiGet(`/api/disciplines?group_id=${encodeURIComponent(gid)}&semester=1`);
+    // Убрали semester=1, бэкенд его игнорирует
+    const data = await apiGet(`/api/disciplines?group_id=${encodeURIComponent(gid)}`);
     const discs = data.items;
     const sel2 = document.getElementById('discSelect');
     sel2.innerHTML = discs.map(d => `<option value="${d.id}">${d.name}</option>`).join('');
@@ -291,9 +300,10 @@ function renderTable(data) {
   wrap.classList.remove('hidden');
   tbody.innerHTML = data.map(s => {
     const parts = s.name.split(' ');
-    const gradeMap = { "TWO": "2", "THREE": "3", "FOUR": "4", "FIVE": "5" };
-    const displayGrade = (s.hasRetake && s.retakeGrade && gradeMap[s.retakeGrade]) ? gradeMap[s.retakeGrade] : (s.grade || '—');
-    const retakeText = s.hasRetake ? (s.retakeGrade || s.retakeScore || 'есть') : '—';
+    // Бэкенд уже возвращает оценку в виде "2", "3", "4", "5" или ""
+    const displayGrade = s.grade || '—';
+    // Пересдача: если есть и она не пустая — показываем, иначе "—"
+    const retakeText = s.hasRetake && s.retakeGrade ? s.retakeGrade : '—';
     return `<tr><td class="num">${s.idx + 1}</td><td>${parts[0] || ''}</td><td>${parts[1] || ''}</td><td>${parts.slice(2).join(' ') || ''}</td><td class="grade">${displayGrade}</td><td class="grade">${retakeText}</td></tr>`;
   }).join('');
 }
@@ -315,7 +325,14 @@ async function fillDocx() {
     form.append('teacher_name', currentTeacherName);
     form.append('students_json', JSON.stringify(studentsData));
     const r = await fetch('/api/docx/fill', { method: 'POST', body: form });
-    if (!r.ok) { const e = await r.json(); throw new Error(e.detail); }
+    if (!r.ok) { 
+      try {
+        const e = await r.json(); 
+        throw new Error(e.detail);
+      } catch {
+        throw new Error(`HTTP ${r.status}`);
+      }
+    }
     const blob = await r.blob();
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -330,7 +347,10 @@ async function fillDocx() {
   btn.disabled = false;
 }
 
-function logout() { localStorage.removeItem('lxp_token'); window.location.href = '/'; }
+function logout() { 
+  localStorage.removeItem('lxp_token'); 
+  window.location.href = '/'; 
+}
 
 init();
 </script>
