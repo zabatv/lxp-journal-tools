@@ -1,0 +1,338 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>LXP Journal Filler</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: 'Inter', sans-serif; background: #f7f9fc; color: #111; min-height: 100vh; }
+.header { background: #fff; border-bottom: 1px solid #e2e5ea; padding: 16px 24px; display: flex; align-items: center; justify-content: space-between; }
+.header h1 { color: #ab00ea; font-size: 18px; font-weight: 700; }
+.header-right { display: flex; align-items: center; gap: 16px; }
+#teacherLabel { font-size: 13px; font-weight: 600; color: #6b7280; }
+.btn-outline { padding: 6px 16px; border: 1px solid #e2e5ea; border-radius: 8px; background: #fff; font-size: 13px; cursor: pointer; transition: .15s; color: #111; }
+.btn-outline:hover { border-color: #ab00ea; color: #ab00ea; }
+.container { max-width: 1100px; margin: 0 auto; padding: 20px 24px; }
+.card { background: #fff; border-radius: 12px; border: 1px solid #e2e5ea; padding: 16px 20px; margin-bottom: 16px; }
+.card-title { font-size: 13px; font-weight: 600; color: #6b7280; margin-bottom: 10px; text-transform: uppercase; letter-spacing: .5px; }
+.row { display: flex; gap: 12px; flex-wrap: wrap; align-items: end; }
+.field { flex: 1; min-width: 150px; }
+.field label { display: block; font-size: 12px; font-weight: 600; color: #111; margin-bottom: 4px; }
+.field select, .field input[type="file"] { width: 100%; padding: 8px 10px; border: 1px solid #e2e5ea; border-radius: 8px; font-size: 13px; font-family: inherit; background: #f7f9fc; outline: none; }
+.field select:focus { border-color: #ab00ea; }
+.file-info { font-size: 12px; color: #6b7280; margin-top: 4px; }
+.actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.btn { padding: 8px 20px; border: none; border-radius: 8px; font-size: 13px; font-weight: 600; cursor: pointer; transition: .15s; }
+.btn-primary { background: #111; color: #fff; }
+.btn-primary:hover { background: #333; }
+.btn-primary:disabled { background: #999; cursor: not-allowed; }
+.btn-accent { background: #ab00ea; color: #fff; }
+.btn-accent:hover { background: #9200c8; }
+.btn-accent:disabled { background: #c878e0; cursor: not-allowed; }
+.status-bar { font-size: 13px; color: #6b7280; }
+.status-bar.success { color: #059669; }
+.status-bar.error { color: #dc2626; }
+.table-wrap { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+th { text-align: left; padding: 10px 12px; border-bottom: 2px solid #e2e5ea; color: #6b7280; font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: .5px; }
+td { padding: 10px 12px; border-bottom: 1px solid #f0f0f0; }
+tr:hover td { background: #fafbfc; }
+td.num { text-align: center; width: 40px; color: #9ca3af; }
+td.grade { text-align: center; font-weight: 600; width: 60px; }
+.empty-state { text-align: center; padding: 40px; color: #9ca3af; font-size: 14px; }
+.loading { opacity: .6; pointer-events: none; }
+.spinner { display: inline-block; width: 14px; height: 14px; border: 2px solid #e2e5ea; border-top-color: #ab00ea; border-radius: 50%; animation: spin .6s linear infinite; vertical-align: middle; margin-right: 6px; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.hidden { display: none; }
+.mt-8 { margin-top: 8px; }
+.ml-8 { margin-left: 8px; }
+.flex { display: flex; align-items: center; }
+</style>
+</head>
+<body>
+<div class="header">
+  <h1>LXP Journal Filler</h1>
+  <div class="header-right">
+    <span id="teacherLabel">Преподаватель: не выбран</span>
+    <button class="btn-outline" onclick="logout()">Выйти</button>
+  </div>
+</div>
+
+<div class="container">
+
+  <!-- File Upload -->
+  <div class="card">
+    <div class="card-title">DOCX файл</div>
+    <div class="row">
+      <div class="field" style="flex:2">
+        <input type="file" id="fileInput" accept=".docx">
+        <div class="file-info" id="fileInfo">Файл не выбран</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Selectors -->
+  <div class="card">
+    <div class="card-title">Выбор</div>
+    <div class="row">
+      <div class="field">
+        <label>Подорганизация</label>
+        <select id="suborgSelect" onchange="onSuborgChange()"><option value="">Загрузка...</option></select>
+      </div>
+      <div class="field" style="max-width:200px">
+        <label>Семестр / Учебный период</label>
+        <select id="semesterSelect" onchange="onSemesterChange()"><option value="">Загрузка...</option></select>
+      </div>
+      <div class="field">
+        <label>Группа</label>
+        <select id="groupSelect" onchange="onGroupChange()"><option value="">—</option></select>
+      </div>
+      <div class="field">
+        <label>Дисциплина</label>
+        <select id="discSelect" onchange="onDiscChange()"><option value="">—</option></select>
+      </div>
+    </div>
+  </div>
+
+  <!-- Actions -->
+  <div class="card">
+    <div class="actions">
+      <button class="btn btn-primary" id="loadBtn" onclick="loadStudents()">Загрузить</button>
+      <button class="btn btn-accent" id="fillBtn" onclick="fillDocx()" disabled>Заполнить DOCX</button>
+      <label style="font-size:13px;display:flex;align-items:center;gap:6px;cursor:pointer;margin-left:8px">
+        <input type="checkbox" id="openCheck" checked> Скачать после сохранения
+      </label>
+      <span class="status-bar" id="statusBar">Готов</span>
+    </div>
+  </div>
+
+  <!-- Table -->
+  <div class="card" style="padding:0">
+    <div id="tableContainer">
+      <div class="empty-state" id="emptyState">Загрузите данные, чтобы увидеть список студентов</div>
+      <div class="table-wrap hidden" id="tableWrap">
+        <table>
+          <thead><tr><th class="num">№</th><th>Фамилия</th><th>Имя</th><th>Отчество</th><th class="grade">Оценка</th><th class="grade">Пересдача</th></tr></thead>
+          <tbody id="tableBody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+let token = (localStorage.getItem('lxp_token') || '').replace(/^Bearer\s+/i, '');
+if (!token) { window.location.href = '/'; }
+
+let suborgData = [];
+let studyPeriodData = [];
+let groupIdMap = {};
+let discIdMap = {};
+let discDataMap = {};
+let studentsData = [];
+let currentGroupName = '';
+let currentDiscName = '';
+let currentTeacherName = '';
+let currentGroupId = '';
+let currentDiscId = '';
+let currentStudyPeriodName = '';
+
+// ---------- Init ----------
+async function init() {
+  try {
+    const r = await fetch('/api/suborganizations?token=' + encodeURIComponent(token));
+    if (!r.ok) { if (r.status === 401) { logout(); return; } throw new Error((await r.json()).detail); }
+    const data = await r.json();
+    suborgData = data.items;
+    const sel = document.getElementById('suborgSelect');
+    sel.innerHTML = suborgData.map((s, i) => `<option value="${i}">${s.suborganization.name}</option>`).join('');
+    if (suborgData.length > 0) onSuborgChange();
+  } catch (e) { setStatus('Ошибка: ' + e.message, 'error'); }
+}
+
+function setStatus(msg, type) {
+  const el = document.getElementById('statusBar');
+  el.textContent = msg;
+  el.className = 'status-bar' + (type ? ' ' + type : '');
+}
+
+async function apiGet(url) {
+  const r = await fetch(url + '&token=' + encodeURIComponent(token));
+  if (!r.ok) { if (r.status === 401) logout(); const e = await r.json(); throw new Error(e.detail); }
+  return r.json();
+}
+
+// ---------- Selectors ----------
+async function onSuborgChange() {
+  const sel = document.getElementById('suborgSelect');
+  const idx = parseInt(sel.value);
+  if (isNaN(idx) || !suborgData[idx]) return;
+  const s = suborgData[idx];
+  const orgId = s.suborganization.organizationId;
+  const suborgId = s.suborganizationId;
+  document.getElementById('groupSelect').innerHTML = '<option value="">Загрузка...</option>';
+  document.getElementById('discSelect').innerHTML = '<option value="">—</option>';
+  document.getElementById('teacherLabel').textContent = 'Преподаватель: не выбран';
+  setStatus('Загрузка учебных периодов...');
+  try {
+    const spData = await apiGet(`/api/study-periods?org_id=${encodeURIComponent(orgId)}`);
+    studyPeriodData = spData.items;
+    const selSp = document.getElementById('semesterSelect');
+    selSp.innerHTML = '<option value="">Все периоды</option>' + studyPeriodData.map(sp => `<option value="${sp.id}">${sp.name}</option>`).join('');
+    if (!studyPeriodData.length) selSp.innerHTML = '<option value="">Нет периодов</option>';
+    // Auto-select current period, otherwise first one
+    const current = studyPeriodData.find(sp => sp.isCurrent);
+    const firstId = current ? current.id : (studyPeriodData.length > 0 ? studyPeriodData[0].id : '');
+    if (firstId) selSp.value = firstId;
+    setStatus('Загрузка групп...');
+    const data = await apiGet(`/api/groups?org_id=${encodeURIComponent(orgId)}&suborg_id=${encodeURIComponent(suborgId)}&study_period_id=${encodeURIComponent(firstId)}`);
+    const groups = data.items;
+    const sel2 = document.getElementById('groupSelect');
+    sel2.innerHTML = groups.map(g => `<option value="${g.id}">${g.name}</option>`).join('');
+    if (!groups.length) sel2.innerHTML = '<option value="">—</option>';
+    groupIdMap = Object.fromEntries(groups.map(g => [g.id, g.name]));
+    setStatus(`Групп: ${groups.length}`, 'success');
+    if (groups.length > 0) onGroupChange();
+  } catch (e) { setStatus('Ошибка: ' + e.message, 'error'); }
+}
+
+async function onGroupChange() {
+  const sel = document.getElementById('groupSelect');
+  const gid = sel.value;
+  if (!gid) return;
+  currentGroupName = groupIdMap[gid] || '';
+  document.getElementById('discSelect').innerHTML = '<option value="">Загрузка...</option>';
+  document.getElementById('teacherLabel').textContent = 'Преподаватель: не выбран';
+  setStatus('Загрузка дисциплин...');
+  try {
+    const data = await apiGet(`/api/disciplines?group_id=${encodeURIComponent(gid)}&semester=1`);
+    const discs = data.items;
+    const sel2 = document.getElementById('discSelect');
+    sel2.innerHTML = discs.map(d => `<option value="${d.id}">${d.name}</option>`).join('');
+    if (!discs.length) sel2.innerHTML = '<option value="">—</option>';
+    discIdMap = Object.fromEntries(discs.map(d => [d.id, d.name]));
+    discDataMap = Object.fromEntries(discs.map(d => [d.id, d]));
+    setStatus(`Дисциплин: ${discs.length}`, 'success');
+  } catch (e) { setStatus('Ошибка: ' + e.message, 'error'); }
+}
+
+function onSemesterChange() {
+  const sel = document.getElementById('semesterSelect');
+  const spId = sel.value;
+  const selSuborg = document.getElementById('suborgSelect');
+  const idx = parseInt(selSuborg.value);
+  if (isNaN(idx) || !suborgData[idx]) return;
+  const orgId = suborgData[idx].suborganization.organizationId;
+  const suborgId = suborgData[idx].suborganizationId;
+  document.getElementById('groupSelect').innerHTML = '<option value="">Загрузка...</option>';
+  document.getElementById('discSelect').innerHTML = '<option value="">—</option>';
+  document.getElementById('teacherLabel').textContent = 'Преподаватель: не выбран';
+  setStatus('Загрузка групп...');
+  apiGet(`/api/groups?org_id=${encodeURIComponent(orgId)}&suborg_id=${encodeURIComponent(suborgId)}&study_period_id=${encodeURIComponent(spId)}`)
+    .then(data => {
+      const groups = data.items;
+      const sel2 = document.getElementById('groupSelect');
+      sel2.innerHTML = groups.map(g => `<option value="${g.id}">${g.name}</option>`).join('');
+      if (!groups.length) sel2.innerHTML = '<option value="">—</option>';
+      groupIdMap = Object.fromEntries(groups.map(g => [g.id, g.name]));
+      setStatus(`Групп: ${groups.length}`, 'success');
+      if (groups.length > 0) onGroupChange();
+    })
+    .catch(e => setStatus('Ошибка: ' + e.message, 'error'));
+}
+
+function onDiscChange() {
+  const gid = document.getElementById('groupSelect').value;
+  const did = document.getElementById('discSelect').value;
+  if (gid && did) loadStudents();
+}
+
+// ---------- Load students ----------
+async function loadStudents() {
+  const gid = document.getElementById('groupSelect').value;
+  const did = document.getElementById('discSelect').value;
+  if (!gid || !did) { setStatus('Выберите группу и дисциплину', 'error'); return; }
+  currentGroupId = gid;
+  currentDiscId = did;
+  currentDiscName = discDataMap[did]?.name || '';
+  const spSel = document.getElementById('semesterSelect');
+  currentStudyPeriodName = spSel.selectedOptions.length ? spSel.selectedOptions[0].text : '';
+  const btn = document.getElementById('loadBtn');
+  btn.disabled = true;
+  setStatus('Загрузка студентов...');
+  try {
+    const spId = document.getElementById('semesterSelect').value;
+    const data = await apiGet(`/api/students?group_id=${encodeURIComponent(gid)}&disc_id=${encodeURIComponent(did)}&study_period_id=${encodeURIComponent(spId)}`);
+    studentsData = data.items;
+    currentTeacherName = data.teacher_name;
+    document.getElementById('teacherLabel').textContent = currentTeacherName ? `Преподаватель: ${currentTeacherName}` : 'Преподаватель: не выбран';
+    renderTable(studentsData);
+    document.getElementById('fillBtn').disabled = false;
+    setStatus(`Загружено: ${data.count} студентов`, 'success');
+  } catch (e) { setStatus('Ошибка: ' + e.message, 'error'); }
+  btn.disabled = false;
+}
+
+function renderTable(data) {
+  const empty = document.getElementById('emptyState');
+  const wrap = document.getElementById('tableWrap');
+  const tbody = document.getElementById('tableBody');
+  if (!data.length) {
+    empty.classList.remove('hidden');
+    wrap.classList.add('hidden');
+    empty.textContent = 'Нет студентов';
+    return;
+  }
+  empty.classList.add('hidden');
+  wrap.classList.remove('hidden');
+  tbody.innerHTML = data.map(s => {
+    const parts = s.name.split(' ');
+    const gradeMap = { "TWO": "2", "THREE": "3", "FOUR": "4", "FIVE": "5" };
+    const displayGrade = (s.hasRetake && s.retakeGrade && gradeMap[s.retakeGrade]) ? gradeMap[s.retakeGrade] : (s.grade || '—');
+    const retakeText = s.hasRetake ? (s.retakeGrade || s.retakeScore || 'есть') : '—';
+    return `<tr><td class="num">${s.idx + 1}</td><td>${parts[0] || ''}</td><td>${parts[1] || ''}</td><td>${parts.slice(2).join(' ') || ''}</td><td class="grade">${displayGrade}</td><td class="grade">${retakeText}</td></tr>`;
+  }).join('');
+}
+
+// ---------- Fill DOCX ----------
+async function fillDocx() {
+  const fileInput = document.getElementById('fileInput');
+  if (!fileInput.files.length) { setStatus('Выберите DOCX файл', 'error'); return; }
+  if (!studentsData.length) { setStatus('Сначала загрузите данные', 'error'); return; }
+  const btn = document.getElementById('fillBtn');
+  btn.disabled = true;
+  setStatus('Заполнение...');
+  try {
+    const form = new FormData();
+    form.append('file', fileInput.files[0]);
+    form.append('token', token);
+    form.append('group_name', currentGroupName);
+    form.append('disc_name', currentDiscName);
+    form.append('teacher_name', currentTeacherName);
+    form.append('students_json', JSON.stringify(studentsData));
+    const r = await fetch('/api/docx/fill', { method: 'POST', body: form });
+    if (!r.ok) { const e = await r.json(); throw new Error(e.detail); }
+    const blob = await r.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'filled_' + fileInput.files[0].name;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    setStatus(`Готово! Заполнено: ${studentsData.length} студентов`, 'success');
+  } catch (e) { setStatus('Ошибка: ' + e.message, 'error'); }
+  btn.disabled = false;
+}
+
+function logout() { localStorage.removeItem('lxp_token'); window.location.href = '/'; }
+
+init();
+</script>
+</body>
+</html>
