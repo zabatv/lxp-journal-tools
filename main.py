@@ -127,6 +127,9 @@ QUERY_USER_GRADE = """
                     disciplineGrade_V2
                     scoreForAnsweredTasks
                     maxScoreForAnsweredTasks
+                    hasRetake
+                    retakeDisciplineGrade
+                    retakeScore
                     topics {{
                         ... on StudentTopic {{
                             status
@@ -286,12 +289,11 @@ async def get_disciplines(token: str = "", group_id: str = ""):
 
 def _determine_grade_from_topics(sd: dict, student_id: str = "") -> dict:
     """
-    Определяет оценку и наличие пересдачи через topics.
-    Логика по Алану:
-    - FAILED — явный кандидат на пересдачу
-    - IN_REVIEW — на проверке
-    - PASSED — закрыто
-    - NOT_PASSED_YET — не закрыто
+    Определяет оценку и наличие пересдачи.
+    Логика:
+    - Берём disciplineGrade_V2 как основную оценку
+    - hasRetake берём из API, а не вычисляем из FAILED тем
+    - retakeDisciplineGrade используем только если hasRetake: True
     """
     result = {
         "grade": "",
@@ -304,54 +306,27 @@ def _determine_grade_from_topics(sd: dict, student_id: str = "") -> dict:
     logger.info(f"=== Student {student_id} ===")
     logger.info(f"disciplineGrade: {sd.get('disciplineGrade')}")
     logger.info(f"disciplineGrade_V2: {sd.get('disciplineGrade_V2')}")
-    logger.info(f"scoreForAnsweredTasks: {sd.get('scoreForAnsweredTasks')}")
-    logger.info(f"maxScoreForAnsweredTasks: {sd.get('maxScoreForAnsweredTasks')}")
     logger.info(f"hasRetake: {sd.get('hasRetake')}")
     logger.info(f"retakeDisciplineGrade: {sd.get('retakeDisciplineGrade')}")
     
-    # Анализируем topics
-    topics = sd.get("topics") or []
-    logger.info(f"Topics count: {len(topics)}")
-    
-    failed_topics = []
-    passed_topics = []
-    other_topics = []
-    
-    for topic in topics:
-        status = topic.get("status")
-        topic_name = topic.get("topic", {}).get("name", "Unknown")
-        topic_score = topic.get("topicScore")
-        
-        if status == "FAILED":
-            failed_topics.append(f"{topic_name} (score: {topic_score})")
-        elif status == "PASSED":
-            passed_topics.append(f"{topic_name} (score: {topic_score})")
-        else:
-            other_topics.append(f"{topic_name} ({status}, score: {topic_score})")
-    
-    logger.info(f"FAILED topics: {failed_topics}")
-    logger.info(f"PASSED topics: {passed_topics}")
-    logger.info(f"Other topics: {other_topics}")
-    
-    # Берём disciplineGrade_V2 как более надёжную
+    # Берём disciplineGrade_V2 как основную оценку
     grade_v2 = sd.get("disciplineGrade_V2") or sd.get("disciplineGrade") or ""
     if grade_v2 in GRADE_MAP:
         result["grade"] = GRADE_MAP[grade_v2]
     elif grade_v2:
         result["grade"] = grade_v2
     
-    # Если есть FAILED темы — это пересдача
-    if len(failed_topics) > 0:
-        result["hasRetake"] = True
+    # hasRetake берём из API
+    has_retake = sd.get("hasRetake", False)
+    result["hasRetake"] = has_retake
+    
+    # retakeDisciplineGrade используем только если hasRetake: True
+    if has_retake:
         retake_grade = sd.get("retakeDisciplineGrade")
         if retake_grade and retake_grade in GRADE_MAP:
             result["retakeGrade"] = GRADE_MAP[retake_grade]
-            # ВАЖНО: пересдача НЕ всегда приоритетнее
-            # Если основная оценка лучше, оставляем её
-            if result["grade"] and result["grade"] in ["4", "5"]:
-                pass  # оставляем основную оценку
-            else:
-                result["grade"] = GRADE_MAP[retake_grade]
+            # Если есть валидная оценка за пересдачу, она приоритетнее
+            result["grade"] = GRADE_MAP[retake_grade]
         elif retake_grade:
             result["retakeGrade"] = retake_grade
     
