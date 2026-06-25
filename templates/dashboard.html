@@ -115,7 +115,7 @@ td.grade { text-align: center; font-weight: 600; width: 60px; }
       <div class="empty-state" id="emptyState">Загрузите данные, чтобы увидеть список студентов</div>
       <div class="table-wrap hidden" id="tableWrap">
         <table>
-          <thead><tr><th class="num">№</th><th>Фамилия</th><th>Имя</th><th>Отчество</th><th class="grade">Оценка</th><th class="grade">Пересдача</th></tr></thead>
+          <thead><tr><th class="num">№</th><th>Фамилия</th><th>Имя</th><th>Отчество</th><th class="grade">Оценка</th></tr></thead>
           <tbody id="tableBody"></tbody>
         </table>
       </div>
@@ -192,7 +192,6 @@ async function onSuborgChange() {
     const selSp = document.getElementById('semesterSelect');
     selSp.innerHTML = '<option value="">Все периоды</option>' + studyPeriodData.map(sp => `<option value="${sp.id}">${sp.name}</option>`).join('');
     if (!studyPeriodData.length) selSp.innerHTML = '<option value="">Нет периодов</option>';
-    // Auto-select current period, otherwise first one
     const current = studyPeriodData.find(sp => sp.isCurrent);
     const firstId = current ? current.id : (studyPeriodData.length > 0 ? studyPeriodData[0].id : '');
     if (firstId) selSp.value = firstId;
@@ -217,7 +216,6 @@ async function onGroupChange() {
   document.getElementById('teacherLabel').textContent = 'Преподаватель: не выбран';
   setStatus('Загрузка дисциплин...');
   try {
-    // Убрали semester=1, бэкенд его игнорирует
     const data = await apiGet(`/api/disciplines?group_id=${encodeURIComponent(gid)}`);
     const discs = data.items;
     const sel2 = document.getElementById('discSelect');
@@ -300,11 +298,8 @@ function renderTable(data) {
   wrap.classList.remove('hidden');
   tbody.innerHTML = data.map(s => {
     const parts = s.name.split(' ');
-    // Бэкенд уже возвращает оценку в виде "2", "3", "4", "5" или ""
     const displayGrade = s.grade || '—';
-    // Пересдача: если есть и она не пустая — показываем, иначе "—"
-    const retakeText = s.hasRetake && s.retakeGrade ? s.retakeGrade : '—';
-    return `<tr><td class="num">${s.idx + 1}</td><td>${parts[0] || ''}</td><td>${parts[1] || ''}</td><td>${parts.slice(2).join(' ') || ''}</td><td class="grade">${displayGrade}</td><td class="grade">${retakeText}</td></tr>`;
+    return `<tr><td class="num">${s.idx + 1}</td><td>${parts[0] || ''}</td><td>${parts[1] || ''}</td><td>${parts.slice(2).join(' ') || ''}</td><td class="grade">${displayGrade}</td></tr>`;
   }).join('');
 }
 
