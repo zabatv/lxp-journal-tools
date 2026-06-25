@@ -99,15 +99,9 @@ QUERY_STUDENT_DISCIPLINES = """
             disciplineId
             disciplineGrade
             disciplineGrade_V2
-            scoreForAnsweredTasks
-            maxScoreForAnsweredTasks
-            hasRetake
-            retakeDisciplineGrade
-            retakeScore
             topics {{
                 ... on StudentTopic {{
                     status
-                    topicScore
                     topic {{
                         id
                         name
@@ -125,15 +119,9 @@ QUERY_USER_GRADE = """
                 studentDiscipline(disciplineId: "{disc_id}") {{ 
                     disciplineGrade
                     disciplineGrade_V2
-                    scoreForAnsweredTasks
-                    maxScoreForAnsweredTasks
-                    hasRetake
-                    retakeDisciplineGrade
-                    retakeScore
                     topics {{
                         ... on StudentTopic {{
                             status
-                            topicScore
                             topic {{
                                 id
                                 name
@@ -156,23 +144,14 @@ def graphql(token: str, query: str, variables: dict = None, timeout: int = 30) -
     if variables:
         body["variables"] = variables
     
-    logger.info(f"=== GraphQL Request ===")
-    logger.info(f"Query: {query.strip()}")
-    if variables:
-        logger.info(f"Variables: {variables}")
-    
     try:
         resp = requests.post(API_URL, headers=headers, json=body, timeout=timeout)
-        logger.info(f"Response status: {resp.status_code}")
-        
         if resp.status_code != 200:
-            logger.error(f"Response body: {resp.text}")
+            logger.error(f"HTTP {resp.status_code}: {resp.text}")
             resp.raise_for_status()
         
         data = resp.json()
-        
         if data.get("errors"):
-            logger.error(f"GraphQL errors: {data['errors']}")
             raise HTTPException(status_code=400, detail=data["errors"][0].get("message", "GraphQL error"))
         
         return data.get("data", {})
@@ -287,53 +266,25 @@ async def get_disciplines(token: str = "", group_id: str = ""):
     return {"items": data["disciplinesByGroups"]}
 
 
-def _determine_grade_from_topics(sd: dict, student_id: str = "") -> dict:
+def _determine_grade(sd: dict) -> str:
     """
-    Определяет оценку и наличие пересдачи.
-    Логика:
-    - Берём disciplineGrade_V2 как основную оценку
-    - hasRetake берём из API, а не вычисляем из FAILED тем
-    - retakeDisciplineGrade используем только если hasRetake: True
+    Простая логика:
+    - Если есть FAILED темы → оценка "2"
+    - Иначе → берём disciplineGrade_V2
     """
-    result = {
-        "grade": "",
-        "hasRetake": False,
-        "retakeGrade": "",
-        "retakeScore": "",
-    }
+    topics = sd.get("topics") or []
+    has_failed = any(t.get("status") == "FAILED" for t in topics)
     
-    # Логируем сырые данные для отладки
-    logger.info(f"=== Student {student_id} ===")
-    logger.info(f"disciplineGrade: {sd.get('disciplineGrade')}")
-    logger.info(f"disciplineGrade_V2: {sd.get('disciplineGrade_V2')}")
-    logger.info(f"hasRetake: {sd.get('hasRetake')}")
-    logger.info(f"retakeDisciplineGrade: {sd.get('retakeDisciplineGrade')}")
+    if has_failed:
+        return "2"
     
-    # Берём disciplineGrade_V2 как основную оценку
     grade_v2 = sd.get("disciplineGrade_V2") or sd.get("disciplineGrade") or ""
     if grade_v2 in GRADE_MAP:
-        result["grade"] = GRADE_MAP[grade_v2]
+        return GRADE_MAP[grade_v2]
     elif grade_v2:
-        result["grade"] = grade_v2
+        return grade_v2
     
-    # hasRetake берём из API
-    has_retake = sd.get("hasRetake", False)
-    result["hasRetake"] = has_retake
-    
-    # retakeDisciplineGrade используем только если hasRetake: True
-    if has_retake:
-        retake_grade = sd.get("retakeDisciplineGrade")
-        if retake_grade and retake_grade in GRADE_MAP:
-            result["retakeGrade"] = GRADE_MAP[retake_grade]
-            # Если есть валидная оценка за пересдачу, она приоритетнее
-            result["grade"] = GRADE_MAP[retake_grade]
-        elif retake_grade:
-            result["retakeGrade"] = retake_grade
-    
-    logger.info(f"Final grade: {result['grade']}, hasRetake: {result['hasRetake']}, retakeGrade: {result['retakeGrade']}")
-    logger.info("=" * 50)
-    
-    return result
+    return ""
 
 
 @app.get("/api/students")
@@ -365,9 +316,6 @@ async def get_students(token: str = "", group_id: str = "", disc_id: str = "", s
             "id": student_id,
             "name": name_map.get(student_id, "Ошибка"),
             "grade": "",
-            "hasRetake": False,
-            "retakeGrade": "",
-            "retakeScore": "",
             "idx": idx,
         }
         try:
@@ -376,16 +324,14 @@ async def get_students(token: str = "", group_id: str = "", disc_id: str = "", s
                 sd_data = graphql(token, query3)
                 for sd in sd_data["searchStudentDisciplines"]:
                     if sd["disciplineId"] == disc_id:
-                        grade_info = _determine_grade_from_topics(sd, student_id)
-                        base.update(grade_info)
+                        base["grade"] = _determine_grade(sd)
                         break
             else:
                 query4 = QUERY_USER_GRADE.format(student_id=student_id, disc_id=disc_id)
                 gdata = graphql(token, query4)
                 sd = gdata["getUserById"]["student"]["studentDiscipline"]
                 if sd:
-                    grade_info = _determine_grade_from_topics(sd, student_id)
-                    base.update(grade_info)
+                    base["grade"] = _determine_grade(sd)
         except Exception as e:
             logger.error(f"Error fetching grade for student {student_id}: {e}")
         return base
@@ -403,10 +349,7 @@ async def get_students(token: str = "", group_id: str = "", disc_id: str = "", s
                     "id": s["id"],
                     "name": name_map.get(s["id"], "Ошибка"),
                     "grade": "",
-                    "hasRetake": False,
-                    "retakeGrade": "",
-                    "retakeScore": "",
-                    "idx": s["id"],
+                    "idx": i,
                 })
     results.sort(key=lambda x: x["idx"])
 
