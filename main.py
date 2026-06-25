@@ -43,11 +43,11 @@ QUERY_GET_ME = """
 """
 
 QUERY_STUDY_PERIODS = """
-    query {
-        studyPeriods {
+    query {{
+        studyPeriods(input: {{ filters: {{ organizationId: "{org_id}" }} }}) {{
             id name startDate endDate
-        }
-    }
+        }}
+    }}
 """
 
 QUERY_GROUPS_BY_PERIOD = """
@@ -208,7 +208,9 @@ async def get_suborganizations(token: str = ""):
 async def get_study_periods(token: str = "", org_id: str = ""):
     if not token:
         raise HTTPException(status_code=401, detail="Требуется токен")
-    data = graphql(token, QUERY_STUDY_PERIODS)
+    
+    query = QUERY_STUDY_PERIODS.format(org_id=org_id)
+    data = graphql(token, query)
     
     now = datetime.now(timezone.utc)
     items = sorted(data["studyPeriods"], key=lambda x: x["startDate"])
