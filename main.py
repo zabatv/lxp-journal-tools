@@ -1,7 +1,7 @@
 import io
 import os
 import json
-import re
+import logging
 from datetime import datetime, timezone
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -13,11 +13,101 @@ from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 from starlette.requests import Request
 
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
+
 app = FastAPI(title="LXP Journal Filler")
 templates = Jinja2Templates(directory="templates")
 
 API_URL = "https://api.newlxp.ru/graphql"
 GRADE_MAP = {"TWO": "2", "THREE": "3", "FOUR": "4", "FIVE": "5"}
+
+
+# ---------- GraphQL Queries ----------
+
+QUERY_SIGN_IN = """
+    query SignIn($input: SignInInput!) {
+        signIn(input: $input) { accessToken }
+    }
+"""
+
+QUERY_GET_ME = """
+    query {
+        getMe {
+            assignedSuborganizations {
+                suborganizationId
+                suborganization { id name organizationId }
+            }
+        }
+    }
+"""
+
+QUERY_STUDY_PERIODS = """
+    query {
+        studyPeriods {
+            id name startDate endDate
+        }
+    }
+"""
+
+QUERY_GROUPS_BY_PERIOD = """
+    query {{
+        learningGroupsByStudyPeriodIdAndSuborganizationId(input: {{
+            studyPeriodId: "{study_period_id}"
+            suborganizationId: "{suborg_id}"
+        }}) {{ id name }}
+    }}
+"""
+
+QUERY_GROUPS_BY_ORG = """
+    query {{
+        getLearningGroups(input: {{ 
+            organizationId: "{org_id}" 
+            suborganizationId: "{suborg_id}" 
+            isArchived: false 
+        }}) {{
+            id name
+        }}
+    }}
+"""
+
+QUERY_DISCIPLINES = """
+    query {{
+        disciplinesByGroups(input: {{ groupIds: ["{group_id}"] }}) {{
+            id name code
+            teachers {{ user {{ lastName firstName middleName }} }}
+        }}
+    }}
+"""
+
+QUERY_STUDENTS = """
+    query {{
+        searchStudentsInLearningGroup(input: {{
+            filters: {{ learningGroupId: "{group_id}", isExpelled: false }}
+        }}) {{
+            items {{ id user {{ lastName firstName middleName }} }}
+        }}
+    }}
+"""
+
+QUERY_STUDENT_DISCIPLINES = """
+    query {{
+        searchStudentDisciplines(input: {{
+            studentId: "{student_id}"
+            filters: {{ studyPeriodId: "{study_period_id}" }}
+        }}) {{
+            disciplineId disciplineGrade hasRetake retakeDisciplineGrade retakeScore
+        }}
+    }}
+"""
+
+QUERY_USER_GRADE = """
+    query {{
+        getUserById(input: {{ userId: "{student_id}" }}) {{
+            student {{ studentDiscipline(disciplineId: "{disc_id}") {{ disciplineGrade }} }}
+        }}
+    }}
+"""
 
 
 # ---------- GraphQL helper ----------
@@ -28,15 +118,31 @@ def graphql(token: str, query: str, variables: dict = None, timeout: int = 30) -
     body = {"query": query}
     if variables:
         body["variables"] = variables
+    
+    logger.info(f"=== GraphQL Request ===")
+    logger.info(f"Query: {query.strip()}")
+    if variables:
+        logger.info(f"Variables: {variables}")
+    
     try:
         resp = requests.post(API_URL, headers=headers, json=body, timeout=timeout)
-        resp.raise_for_status()
+        logger.info(f"Response status: {resp.status_code}")
+        
+        if resp.status_code != 200:
+            logger.error(f"Response body: {resp.text}")
+            resp.raise_for_status()
+        
+        data = resp.json()
+        
+        if data.get("errors"):
+            logger.error(f"GraphQL errors: {data['errors']}")
+            raise HTTPException(status_code=400, detail=data["errors"][0].get("message", "GraphQL error"))
+        
+        return data.get("data", {})
+        
     except requests.RequestException as e:
+        logger.error(f"Request failed: {e}")
         raise HTTPException(status_code=502, detail=f"LXP недоступен: {e}")
-    data = resp.json()
-    if data.get("errors"):
-        raise HTTPException(status_code=400, detail=data["errors"][0].get("message", "GraphQL error"))
-    return data.get("data", {})
 
 
 # ---------- Pages ----------
@@ -60,11 +166,7 @@ class LoginInput(BaseModel):
 
 @app.post("/api/auth/login")
 async def login(input: LoginInput):
-    data = graphql("", """
-        query SignIn($input: SignInInput!) {
-            signIn(input: $input) { accessToken }
-        }
-    """, variables={"input": {"email": input.email.strip(), "password": input.password}})
+    data = graphql("", QUERY_SIGN_IN, variables={"input": {"email": input.email.strip(), "password": input.password}})
     token = data.get("signIn", {}).get("accessToken")
     if not token:
         raise HTTPException(status_code=401, detail="Токен не получен")
@@ -90,18 +192,8 @@ async def check_token(request: Request):
 async def get_suborganizations(token: str = ""):
     if not token:
         raise HTTPException(status_code=401, detail="Требуется токен")
-    data = graphql(token, """
-        query {
-            getMe {
-                assignedSuborganizations {
-                    suborganizationId
-                    suborganization { id name organizationId }
-                }
-            }
-        }
-    """)
+    data = graphql(token, QUERY_GET_ME)
     items = data["getMe"]["assignedSuborganizations"]
-    # дедупликация по suborganizationId
     seen = set()
     result = []
     for item in items:
@@ -116,15 +208,11 @@ async def get_suborganizations(token: str = ""):
 async def get_study_periods(token: str = "", org_id: str = ""):
     if not token:
         raise HTTPException(status_code=401, detail="Требуется токен")
-    data = graphql(token, """
-        query($orgId: ID!) {
-            studyPeriods(input: { filters: { organizationId: $orgId } }) {
-                id name startDate endDate
-            }
-        }
-    """, variables={"orgId": org_id})
+    data = graphql(token, QUERY_STUDY_PERIODS)
+    
     now = datetime.now(timezone.utc)
     items = sorted(data["studyPeriods"], key=lambda x: x["startDate"])
+    
     for sp in items:
         try:
             end = datetime.fromisoformat(sp["endDate"].replace("Z", "+00:00"))
@@ -132,6 +220,7 @@ async def get_study_periods(token: str = "", org_id: str = ""):
             sp["isCurrent"] = start <= now <= end
         except Exception:
             sp["isCurrent"] = False
+    
     return {"items": items}
 
 
@@ -139,23 +228,14 @@ async def get_study_periods(token: str = "", org_id: str = ""):
 async def get_groups(token: str = "", org_id: str = "", suborg_id: str = "", study_period_id: str = ""):
     if not token:
         raise HTTPException(status_code=401, detail="Требуется токен")
+    
     if study_period_id:
-        data = graphql(token, """
-            query($spId: ID!, $suborgId: ID!) {
-                learningGroupsByStudyPeriodIdAndSuborganizationId(input: {
-                    studyPeriodId: $spId
-                    suborganizationId: $suborgId
-                }) { id name }
-            }
-        """, variables={"spId": study_period_id, "suborgId": suborg_id})
+        query = QUERY_GROUPS_BY_PERIOD.format(study_period_id=study_period_id, suborg_id=suborg_id)
+        data = graphql(token, query)
         return {"items": data["learningGroupsByStudyPeriodIdAndSuborganizationId"]}
-    data = graphql(token, """
-        query($orgId: ID!, $suborgId: ID!) {
-            getLearningGroups(input: { organizationId: $orgId, suborganizationId: $suborgId, isArchived: false }) {
-                id name
-            }
-        }
-    """, variables={"orgId": org_id, "suborgId": suborg_id})
+    
+    query = QUERY_GROUPS_BY_ORG.format(org_id=org_id, suborg_id=suborg_id)
+    data = graphql(token, query)
     return {"items": data["getLearningGroups"]}
 
 
@@ -163,14 +243,8 @@ async def get_groups(token: str = "", org_id: str = "", suborg_id: str = "", stu
 async def get_disciplines(token: str = "", group_id: str = ""):
     if not token:
         raise HTTPException(status_code=401, detail="Требуется токен")
-    data = graphql(token, """
-        query($groupIds: [ID!]!) {
-            disciplinesByGroups(input: { groupIds: $groupIds }) {
-                id name code
-                teachers { user { lastName firstName middleName } }
-            }
-        }
-    """, variables={"groupIds": [group_id]})
+    query = QUERY_DISCIPLINES.format(group_id=group_id)
+    data = graphql(token, query)
     return {"items": data["disciplinesByGroups"]}
 
 
@@ -179,27 +253,12 @@ async def get_students(token: str = "", group_id: str = "", disc_id: str = "", s
     if not token:
         raise HTTPException(status_code=401, detail="Требуется токен")
 
-    # 1. Студенты группы
-    students_data = graphql(token, """
-        query($groupId: ID!) {
-            searchStudentsInLearningGroup(input: {
-                filters: { learningGroupId: $groupId, isExpelled: false }
-            }) {
-                items { id user { lastName firstName middleName } }
-            }
-        }
-    """, variables={"groupId": group_id})
+    query1 = QUERY_STUDENTS.format(group_id=group_id)
+    students_data = graphql(token, query1)
     students = students_data["searchStudentsInLearningGroup"]["items"]
 
-    # 2. Дисциплины группы (один запрос — и преподавателя найдём, и проверим disc_id)
-    disc_data = graphql(token, """
-        query($groupIds: [ID!]!) {
-            disciplinesByGroups(input: { groupIds: $groupIds }) {
-                id name
-                teachers { user { lastName firstName middleName } }
-            }
-        }
-    """, variables={"groupIds": [group_id]})
+    query2 = QUERY_DISCIPLINES.format(group_id=group_id)
+    disc_data = graphql(token, query2)
 
     teacher_name = ""
     for d in disc_data["disciplinesByGroups"]:
@@ -213,7 +272,6 @@ async def get_students(token: str = "", group_id: str = "", disc_id: str = "", s
         for s in students
     }
 
-    # 3. Оценки по каждому студенту (параллельно)
     def get_grade(student_id: str, idx: int) -> dict:
         base = {
             "id": student_id,
@@ -226,16 +284,8 @@ async def get_students(token: str = "", group_id: str = "", disc_id: str = "", s
         }
         try:
             if study_period_id:
-                sd_data = graphql(token, """
-                    query($studentId: ID!, $spId: ID!) {
-                        searchStudentDisciplines(input: {
-                            studentId: $studentId
-                            filters: { studyPeriodId: $spId }
-                        }) {
-                            disciplineId disciplineGrade hasRetake retakeDisciplineGrade retakeScore
-                        }
-                    }
-                """, variables={"studentId": student_id, "spId": study_period_id})
+                query3 = QUERY_STUDENT_DISCIPLINES.format(student_id=student_id, study_period_id=study_period_id)
+                sd_data = graphql(token, query3)
                 for sd in sd_data["searchStudentDisciplines"]:
                     if sd["disciplineId"] == disc_id:
                         base["grade"] = sd.get("disciplineGrade") or ""
@@ -244,23 +294,17 @@ async def get_students(token: str = "", group_id: str = "", disc_id: str = "", s
                         base["retakeScore"] = sd.get("retakeScore") or ""
                         break
             else:
-                gdata = graphql(token, """
-                    query($userId: ID!, $discId: ID!) {
-                        getUserById(input: { userId: $userId }) {
-                            student { studentDiscipline(disciplineId: $discId) { disciplineGrade } }
-                        }
-                    }
-                """, variables={"userId": student_id, "discId": disc_id})
+                query4 = QUERY_USER_GRADE.format(student_id=student_id, disc_id=disc_id)
+                gdata = graphql(token, query4)
                 sd = gdata["getUserById"]["student"]["studentDiscipline"]
                 base["grade"] = (sd or {}).get("disciplineGrade") or ""
 
-            # Если есть пересдача с валидной оценкой — она приоритетнее
             if base["hasRetake"] and base["retakeGrade"] in GRADE_MAP:
                 base["grade"] = GRADE_MAP[base["retakeGrade"]]
             elif base["grade"] in GRADE_MAP:
                 base["grade"] = GRADE_MAP[base["grade"]]
-        except Exception:
-            pass
+        except Exception as e:
+            logger.error(f"Error fetching grade for student {student_id}: {e}")
         return base
 
     results = []
@@ -269,7 +313,8 @@ async def get_students(token: str = "", group_id: str = "", disc_id: str = "", s
         for future in as_completed(futures):
             try:
                 results.append(future.result(timeout=15))
-            except Exception:
+            except Exception as e:
+                logger.error(f"Timeout or error in thread: {e}")
                 s = futures[future]
                 results.append({
                     "id": s["id"],
@@ -288,11 +333,6 @@ async def get_students(token: str = "", group_id: str = "", disc_id: str = "", s
 # ---------- DOCX Fill ----------
 
 def _replace_in_paragraph(paragraph, mapping: dict) -> None:
-    """
-    Надёжная замена плейсхолдеров в параграфе.
-    Word часто разбивает плейсхолдер на несколько run'ов (% в одном, g в другом).
-    Собираем весь текст параграфа, делаем замену, затем распределяем обратно.
-    """
     full_text = "".join(run.text for run in paragraph.runs)
     if not any(ph in full_text for ph in mapping):
         return
@@ -304,7 +344,6 @@ def _replace_in_paragraph(paragraph, mapping: dict) -> None:
     if new_text == full_text:
         return
 
-    # Распределяем новый текст: весь текст кладём в первый run, остальные очищаем
     if paragraph.runs:
         paragraph.runs[0].text = new_text
         for run in paragraph.runs[1:]:
@@ -332,16 +371,13 @@ async def fill_docx(
     doc = Document(io.BytesIO(content))
     students = json.loads(students_json)
 
-    # Глобальные плейсхолдеры (вне таблицы)
     global_mapping = {"%g": group_name, "%d": disc_name, "%t": teacher_name}
     for para in doc.paragraphs:
         _replace_in_paragraph(para, global_mapping)
 
-    # Табличные плейсхолдеры
     student_idx = 0
     for table in doc.tables:
         for row in table.rows:
-            # Проверяем, есть ли в строке маркеры студента
             row_text = "".join(cell.text for cell in row.cells)
             has_student_marker = "%n" in row_text or "%q" in row_text
 
@@ -374,8 +410,6 @@ async def fill_docx(
     )
 
 
-# ---------- Example DOCX ----------
-
 @app.get("/example")
 async def download_example():
     file_path = os.path.join(os.path.dirname(__file__), "static", "example.docx")
@@ -393,4 +427,5 @@ async def download_example():
 if __name__ == "__main__":
     import uvicorn
     port = int(os.environ.get("PORT", 8000))
+    logger.info(f"Starting LXP Journal Filler on port {port}")
     uvicorn.run(app, host="0.0.0.0", port=port, log_level="info")
