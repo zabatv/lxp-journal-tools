@@ -274,57 +274,63 @@ async def get_disciplines(token: str = "", group_id: str = ""):
 
 def _determine_grade(sd: dict) -> str:
     """Определяет итоговую оценку по дисциплине"""
-    # Получаем все данные
-    discipline_grade = sd.get("disciplineGrade")  # может быть int или str
+    discipline_grade = sd.get("disciplineGrade")
     discipline_grade_v2 = sd.get("disciplineGrade_V2") or ""
     has_retake = sd.get("hasRetake", False)
     retake_discipline_grade = sd.get("retakeDisciplineGrade") or ""
     retake_score = sd.get("retakeScore")
     
-    # Логируем для отладки
-    logger.info(f"📊 _determine_grade: grade={discipline_grade}, grade_v2='{discipline_grade_v2}', "
-                f"hasRetake={has_retake}, retakeGrade='{retake_discipline_grade}'")
+    # Логируем
+    logger.info(f"📊 grade={discipline_grade}, grade_v2='{discipline_grade_v2}', "
+                f"hasRetake={has_retake}, retakeGrade='{retake_discipline_grade}', "
+                f"retakeScore={retake_score}")
     
-    # ПРИОРИТЕТ 1: Если есть пересдача И есть оценка за пересдачу
-    if has_retake and retake_discipline_grade:
-        if retake_discipline_grade in GRADE_MAP:
-            return GRADE_MAP[retake_discipline_grade]
-        elif retake_discipline_grade.isdigit():
-            return retake_discipline_grade
-        else:
-            return retake_discipline_grade
-    
-    # ПРИОРИТЕТ 2: Если есть пересдача, но нет оценки - проверяем retakeScore
+    # 1. ЕСЛИ ЕСТЬ ПЕРЕСДАЧА И БАЛЛЫ ЗА ПЕРЕСДАЧУ
     if has_retake and retake_score is not None:
         try:
             score = float(retake_score)
-            if score >= 60:
+            if score >= 50:  # 🔥 50 баллов = 3
+                logger.info(f"✅ Пересдача сдана! score={score} → 3")
                 return "3"
             else:
+                logger.info(f"❌ Пересдача НЕ сдана! score={score} → 2")
                 return "2"
         except:
             pass
     
-    # ПРИОРИТЕТ 3: Используем disciplineGrade_V2 (ЭТО ГЛАВНАЯ ОЦЕНКА!)
+    # 2. ЕСЛИ ЕСТЬ ПЕРЕСДАЧА И ОЦЕНКА ЗА ПЕРЕСДАЧУ (НЕ "TWO")
+    if has_retake and retake_discipline_grade:
+        if retake_discipline_grade in GRADE_MAP:
+            grade = GRADE_MAP[retake_discipline_grade]
+            if grade != "2":
+                logger.info(f"✅ Пересдача с оценкой {retake_discipline_grade} → {grade}")
+                return grade
+    
+    # 3. ЕСЛИ ЕСТЬ ПЕРЕСДАЧА, НО НЕТ ДАННЫХ О СДАЧЕ
+    if has_retake:
+        # Проверяем темы - если есть PASSED, значит сдал
+        topics = sd.get("topics") or []
+        has_passed = any(t.get("status") == "PASSED" for t in topics)
+        if has_passed:
+            logger.info(f"✅ Есть PASSED темы → 3")
+            return "3"
+        logger.info(f"⚠️ Пересдача есть, но нет данных о сдаче → 2")
+        return "2"
+    
+    # 4. ИСПОЛЬЗУЕМ disciplineGrade_V2
     if discipline_grade_v2:
         if discipline_grade_v2 in GRADE_MAP:
             return GRADE_MAP[discipline_grade_v2]
-        elif discipline_grade_v2.isdigit():
-            return discipline_grade_v2
-        else:
-            return discipline_grade_v2
+        return str(discipline_grade_v2)
     
-    # ПРИОРИТЕТ 4: Используем disciplineGrade (если V2 нет)
+    # 5. ИСПОЛЬЗУЕМ disciplineGrade
     if discipline_grade is not None:
-        grade_str = str(discipline_grade)
-        if grade_str in GRADE_MAP:
-            return GRADE_MAP[grade_str]
-        elif grade_str.isdigit():
-            return grade_str
-        else:
-            return grade_str
+        if isinstance(discipline_grade, (int, float)):
+            return str(int(discipline_grade))
+        if discipline_grade in GRADE_MAP:
+            return GRADE_MAP[discipline_grade]
+        return str(discipline_grade)
     
-    # Если ничего нет
     return ""
     
     # Если есть пересдача, но нет retakeDisciplineGrade и retakeScore
