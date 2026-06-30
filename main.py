@@ -269,27 +269,21 @@ async def get_disciplines(token: str = "", group_id: str = ""):
 
 
 def _determine_grade(sd: dict) -> str:
-    """
-    Логика определения оценки:
-    - Если есть FAILED темы + hasRetake: False → не сдал → "2"
-    - Если есть FAILED темы + hasRetake: True → пересдал → максимум "3"
-    - Если нет FAILED тем → обычная оценка из API (3, 4, 5)
-    """
     topics = sd.get("topics") or []
     has_failed = any(t.get("status") == "FAILED" for t in topics)
     has_retake = sd.get("hasRetake", False)
     
-    # Если есть проваленные темы
-    if has_failed:
-        if has_retake:
-            # Пересдал — максимум 3
-            return "3"
-        else:
-            # Не пересдал — 2
-            return "2"
-    
-    # Нет проваленных тем — берём обычную оценку
+    # Проверяем grade из API
     grade_v2 = sd.get("disciplineGrade_V2") or sd.get("disciplineGrade") or ""
+    
+    # Если есть проваленные темы И пересдача - берем grade
+    if has_failed and has_retake:
+        # Если grade есть, используем его, иначе "3"
+        if grade_v2 in GRADE_MAP:
+            return GRADE_MAP[grade_v2]
+        return "3"
+    
+    # В остальных случаях используем grade из API
     if grade_v2 in GRADE_MAP:
         return GRADE_MAP[grade_v2]
     elif grade_v2:
