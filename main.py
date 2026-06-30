@@ -272,14 +272,24 @@ async def get_disciplines(token: str = "", group_id: str = ""):
     return {"items": data["disciplinesByGroups"]}
 
 
-
-
 def _determine_grade(sd: dict) -> str:
-    """Определяет итоговую оценку по дисциплине"""
-    discipline_grade_v2 = sd.get("disciplineGrade_V2") or ""
+    """
+    Определяет итоговую оценку по дисциплине.
+    
+    Приоритеты:
+    1. Если есть пересдача (hasRetake=True) и есть retakeDisciplineGrade - используем её
+    2. Если есть пересдача и retakeScore >= 50 - возвращаем "3"
+    3. Если есть пересдача и retakeScore < 50 - возвращаем "2"
+    4. Если нет пересдачи - используем disciplineGrade_V2
+    """
     has_retake = sd.get("hasRetake", False)
+    discipline_grade_v2 = sd.get("disciplineGrade_V2") or ""
     retake_discipline_grade = sd.get("retakeDisciplineGrade") or ""
     retake_score = sd.get("retakeScore")
+    
+    # Логируем для отладки
+    logger.debug(f"_determine_grade: has_retake={has_retake}, grade_v2='{discipline_grade_v2}', "
+                 f"retake_grade='{retake_discipline_grade}', retake_score={retake_score}")
     
     # 1. Если есть пересдача И оценка за пересдачу
     if has_retake and retake_discipline_grade:
@@ -290,24 +300,33 @@ def _determine_grade(sd: dict) -> str:
         else:
             return retake_discipline_grade
     
-    # 2. Если есть пересдача И баллы за пересдачу >= 50
+    # 2. Если есть пересдача И баллы за пересдачу
     if has_retake and retake_score is not None:
         try:
-            if float(retake_score) >= 50:
+            score = float(retake_score)
+            if score >= 50:
                 return "3"
             else:
                 return "2"
-        except:
+        except (ValueError, TypeError):
             pass
     
-    # 3. Нет пересдачи - берем grade_v2
+    # 3. Нет пересдачи или нет данных о пересдаче - берем grade_v2
     if discipline_grade_v2 in GRADE_MAP:
         return GRADE_MAP[discipline_grade_v2]
     elif discipline_grade_v2:
         return str(discipline_grade_v2)
     
+    # 4. Если grade_v2 нет - пробуем disciplineGrade (на случай, если V2 пустой)
+    discipline_grade = sd.get("disciplineGrade")
+    if discipline_grade is not None:
+        if isinstance(discipline_grade, (int, float)):
+            return str(int(discipline_grade))
+        if discipline_grade in GRADE_MAP:
+            return GRADE_MAP[discipline_grade]
+        return str(discipline_grade)
+    
     return ""
-
 
 
 @app.get("/api/students")
