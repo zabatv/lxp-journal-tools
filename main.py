@@ -275,22 +275,21 @@ def _determine_grade(sd: dict) -> str:
     
     grade_v2 = sd.get("disciplineGrade_V2") or sd.get("disciplineGrade") or ""
     
-    # Если есть пересдача - всегда "3" (независимо от grade_v2)
-    if has_retake:
+    # Если есть пересдача И grade_v2 == "2" (TWO) - значит студент пересдал и получил "3"
+    if has_retake and grade_v2 == "TWO":
         return "3"
     
-    # Если нет пересдачи, но есть failed темы - смотрим grade_v2
-    if has_failed:
-        if grade_v2 in GRADE_MAP:
-            return GRADE_MAP[grade_v2]
-        return "2"  # если нет оценки и есть failed - не сдал
+    # Если есть пересдача, но grade_v2 не "2" - используем grade_v2
+    if has_retake and grade_v2 in GRADE_MAP:
+        return GRADE_MAP[grade_v2]
     
-    # Если нет failed тем - используем grade из API
+    # Если нет пересдачи - используем grade из API
     if grade_v2 in GRADE_MAP:
         return GRADE_MAP[grade_v2]
     elif grade_v2:
         return grade_v2
     
+    # Если ничего нет - возвращаем пустоту
     return ""
 
 
