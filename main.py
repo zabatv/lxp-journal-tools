@@ -274,22 +274,19 @@ async def get_disciplines(token: str = "", group_id: str = ""):
 
 def _determine_grade(sd: dict) -> str:
     """Определяет итоговую оценку по дисциплине"""
-    # Получаем все необходимые данные
-    discipline_grade = sd.get("disciplineGrade") or ""
+    # Получаем все данные
+    discipline_grade = sd.get("disciplineGrade")  # может быть int или str
     discipline_grade_v2 = sd.get("disciplineGrade_V2") or ""
     has_retake = sd.get("hasRetake", False)
     retake_discipline_grade = sd.get("retakeDisciplineGrade") or ""
-    retake_score = sd.get("retakeScore") or ""
+    retake_score = sd.get("retakeScore")
     
-    # 🔥 ПОДРОБНОЕ ЛОГИРОВАНИЕ ВСЕХ ДАННЫХ
-    logger.info("=" * 60)
-    logger.info("📊 ПОЛНЫЕ ДАННЫЕ ДИСЦИПЛИНЫ:")
-    logger.info(json.dumps(sd, indent=2, default=str, ensure_ascii=False))
-    logger.info("=" * 60)
+    # Логируем для отладки
+    logger.info(f"📊 _determine_grade: grade={discipline_grade}, grade_v2='{discipline_grade_v2}', "
+                f"hasRetake={has_retake}, retakeGrade='{retake_discipline_grade}'")
     
-    # Если есть пересдача и оценка за пересдачу
+    # ПРИОРИТЕТ 1: Если есть пересдача И есть оценка за пересдачу
     if has_retake and retake_discipline_grade:
-        logger.info(f"✅ Есть пересдача и оценка за пересдачу: {retake_discipline_grade}")
         if retake_discipline_grade in GRADE_MAP:
             return GRADE_MAP[retake_discipline_grade]
         elif retake_discipline_grade.isdigit():
@@ -297,19 +294,38 @@ def _determine_grade(sd: dict) -> str:
         else:
             return retake_discipline_grade
     
-    # Если есть пересдача, но оценки за пересдачу нет - проверяем retakeScore
-    if has_retake and retake_score:
-        logger.info(f"✅ Есть пересдача и баллы за пересдачу: {retake_score}")
+    # ПРИОРИТЕТ 2: Если есть пересдача, но нет оценки - проверяем retakeScore
+    if has_retake and retake_score is not None:
         try:
             score = float(retake_score)
             if score >= 60:
-                return "3"
-            elif score >= 40:
                 return "3"
             else:
                 return "2"
         except:
             pass
+    
+    # ПРИОРИТЕТ 3: Используем disciplineGrade_V2 (ЭТО ГЛАВНАЯ ОЦЕНКА!)
+    if discipline_grade_v2:
+        if discipline_grade_v2 in GRADE_MAP:
+            return GRADE_MAP[discipline_grade_v2]
+        elif discipline_grade_v2.isdigit():
+            return discipline_grade_v2
+        else:
+            return discipline_grade_v2
+    
+    # ПРИОРИТЕТ 4: Используем disciplineGrade (если V2 нет)
+    if discipline_grade is not None:
+        grade_str = str(discipline_grade)
+        if grade_str in GRADE_MAP:
+            return GRADE_MAP[grade_str]
+        elif grade_str.isdigit():
+            return grade_str
+        else:
+            return grade_str
+    
+    # Если ничего нет
+    return ""
     
     # Если есть пересдача, но нет retakeDisciplineGrade и retakeScore
     if has_retake:
