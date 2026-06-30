@@ -276,27 +276,37 @@ async def get_disciplines(token: str = "", group_id: str = ""):
 
 def _determine_grade(sd: dict) -> str:
     """Определяет итоговую оценку по дисциплине"""
-    
-    # Берем оценку из API
     discipline_grade_v2 = sd.get("disciplineGrade_V2") or ""
+    has_retake = sd.get("hasRetake", False)
+    retake_discipline_grade = sd.get("retakeDisciplineGrade") or ""
+    retake_score = sd.get("retakeScore")
     
-    # Если есть оценка - возвращаем её
+    # 1. Если есть пересдача И оценка за пересдачу
+    if has_retake and retake_discipline_grade:
+        if retake_discipline_grade in GRADE_MAP:
+            return GRADE_MAP[retake_discipline_grade]
+        elif retake_discipline_grade.isdigit():
+            return retake_discipline_grade
+        else:
+            return retake_discipline_grade
+    
+    # 2. Если есть пересдача И баллы за пересдачу >= 50
+    if has_retake and retake_score is not None:
+        try:
+            if float(retake_score) >= 50:
+                return "3"
+            else:
+                return "2"
+        except:
+            pass
+    
+    # 3. Нет пересдачи - берем grade_v2
     if discipline_grade_v2 in GRADE_MAP:
         return GRADE_MAP[discipline_grade_v2]
     elif discipline_grade_v2:
         return str(discipline_grade_v2)
     
-    # Если V2 нет - пробуем disciplineGrade
-    discipline_grade = sd.get("disciplineGrade")
-    if discipline_grade is not None:
-        if isinstance(discipline_grade, (int, float)):
-            return str(int(discipline_grade))
-        if discipline_grade in GRADE_MAP:
-            return GRADE_MAP[discipline_grade]
-        return str(discipline_grade)
-    
     return ""
-
 
 
 
