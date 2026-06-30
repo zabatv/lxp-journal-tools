@@ -281,12 +281,15 @@ def _determine_grade(sd: dict) -> str:
     retake_discipline_grade = sd.get("retakeDisciplineGrade") or ""
     retake_score = sd.get("retakeScore") or ""
     
-    # Логируем для отладки
-    logger.info(f"📊 _determine_grade: grade='{discipline_grade}', grade_v2='{discipline_grade_v2}', "
-                f"hasRetake={has_retake}, retakeGrade='{retake_discipline_grade}', retakeScore='{retake_score}'")
+    # 🔥 ПОДРОБНОЕ ЛОГИРОВАНИЕ ВСЕХ ДАННЫХ
+    logger.info("=" * 60)
+    logger.info("📊 ПОЛНЫЕ ДАННЫЕ ДИСЦИПЛИНЫ:")
+    logger.info(json.dumps(sd, indent=2, default=str, ensure_ascii=False))
+    logger.info("=" * 60)
     
     # Если есть пересдача и оценка за пересдачу
     if has_retake and retake_discipline_grade:
+        logger.info(f"✅ Есть пересдача и оценка за пересдачу: {retake_discipline_grade}")
         if retake_discipline_grade in GRADE_MAP:
             return GRADE_MAP[retake_discipline_grade]
         elif retake_discipline_grade.isdigit():
@@ -296,16 +299,38 @@ def _determine_grade(sd: dict) -> str:
     
     # Если есть пересдача, но оценки за пересдачу нет - проверяем retakeScore
     if has_retake and retake_score:
+        logger.info(f"✅ Есть пересдача и баллы за пересдачу: {retake_score}")
         try:
             score = float(retake_score)
             if score >= 60:
                 return "3"
             elif score >= 40:
-                return "3"  # Или оставить как есть
+                return "3"
             else:
                 return "2"
         except:
             pass
+    
+    # Если есть пересдача, но нет retakeDisciplineGrade и retakeScore
+    if has_retake:
+        logger.info(f"⚠️ Есть пересдача (hasRetake=True), но нет оценки и баллов за пересдачу!")
+        logger.info(f"   disciplineGrade: {discipline_grade}")
+        logger.info(f"   disciplineGrade_V2: {discipline_grade_v2}")
+        # Если у студента есть пересдача, но нет оценки - ставим "3" (по умолчанию)
+        # ИЛИ проверяем topics на наличие пройденных тем после пересдачи
+        topics = sd.get("topics") or []
+        for t in topics:
+            logger.info(f"   Topic: {t.get('topic', {}).get('name')} - status: {t.get('status')}")
+        
+        # Проверяем, есть ли темы со статусом "PASSED" (значит пересдал)
+        has_passed = any(t.get("status") == "PASSED" for t in topics)
+        if has_passed:
+            logger.info("✅ Есть пройденные темы (PASSED) - ставим 3")
+            return "3"
+        
+        # Если ничего не помогает - возвращаем 3 (по умолчанию для пересдачи)
+        logger.info("⚠️ Возвращаем 3 по умолчанию (пересдача)")
+        return "3"
     
     # Используем disciplineGrade_V2 (приоритет)
     if discipline_grade_v2 in GRADE_MAP:
