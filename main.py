@@ -273,44 +273,56 @@ async def get_disciplines(token: str = "", group_id: str = ""):
 
 
 def _determine_grade(sd: dict) -> str:
-    """Определяет итоговую оценку по дисциплине"""
-    discipline_grade_v2 = sd.get("disciplineGrade_V2") or ""
-    has_retake = sd.get("hasRetake", False)
-    retake_discipline_grade = sd.get("retakeDisciplineGrade") or ""
-    retake_score = sd.get("retakeScore")
+    """Определяет итоговую оценку по дисциплине на основе статусов тем"""
     
-    # Если есть пересдача И баллы >= 50 ИЛИ оценка не "TWO" → сдал
-    if has_retake:
-        # Проверяем баллы
-        if retake_score is not None:
-            try:
-                if float(retake_score) >= 50:
-                    return "3"
-                else:
-                    return "2"
-            except:
-                pass
-        
-        # Проверяем оценку за пересдачу
-        if retake_discipline_grade:
-            if retake_discipline_grade in GRADE_MAP:
-                grade = GRADE_MAP[retake_discipline_grade]
-                if grade != "2":
-                    return grade
-            elif retake_discipline_grade.isdigit() and retake_discipline_grade != "2":
-                return retake_discipline_grade
-        
-        # Если есть пересдача, но нет данных о сдаче → 2
+    # 1. Смотрим disciplineGrade_V2 (это итоговая оценка)
+    discipline_grade_v2 = sd.get("disciplineGrade_V2") or ""
+    
+    # 2. Смотрим все темы
+    topics = sd.get("topics") or []
+    
+    # 3. Проверяем статусы тем
+    has_failed = any(t.get("status") == "FAILED" for t in topics)
+    has_passed = any(t.get("status") == "PASSED" for t in topics)
+    has_in_review = any(t.get("status") == "IN_REVIEW" for t in topics)
+    
+    # Логируем для отладки
+    logger.info(f"📊 topics statuses: FAILED={has_failed}, PASSED={has_passed}, IN_REVIEW={has_in_review}")
+    logger.info(f"📊 grade_v2='{discipline_grade_v2}'")
+    
+    # 4. Если есть FAILED темы И нет PASSED (и нет IN_REVIEW) → студент не сдал
+    if has_failed and not has_passed and not has_in_review:
+        logger.info(f"❌ Есть FAILED темы, нет PASSED → 2")
         return "2"
     
-    # Нет пересдачи → берем grade_v2
+    # 5. Если есть FAILED темы, но есть PASSED → пересдача сдана → берем grade_v2
+    if has_failed and has_passed:
+        logger.info(f"✅ Есть FAILED и PASSED → пересдача сдана")
+        if discipline_grade_v2 in GRADE_MAP:
+            return GRADE_MAP[discipline_grade_v2]
+        return str(discipline_grade_v2) if discipline_grade_v2 else "3"
+    
+    # 6. Если есть IN_REVIEW → работа на проверке → пока ставим прочерк или берем grade_v2
+    if has_in_review:
+        logger.info(f"⏳ Есть IN_REVIEW → работа на проверке")
+        if discipline_grade_v2 in GRADE_MAP:
+            return GRADE_MAP[discipline_grade_v2]
+        return ""
+    
+    # 7. Если нет FAILED и есть PASSED → всё сдано → берем grade_v2
+    if not has_failed and has_passed:
+        logger.info(f"✅ Нет FAILED, есть PASSED → всё сдано")
+        if discipline_grade_v2 in GRADE_MAP:
+            return GRADE_MAP[discipline_grade_v2]
+        return str(discipline_grade_v2) if discipline_grade_v2 else ""
+    
+    # 8. Если нет тем или все null → берем grade_v2
     if discipline_grade_v2 in GRADE_MAP:
         return GRADE_MAP[discipline_grade_v2]
     elif discipline_grade_v2:
         return str(discipline_grade_v2)
     
     return ""
-
 
 @app.get("/api/students")
 async def get_students(token: str = "", group_id: str = "", disc_id: str = "", study_period_id: str = ""):
