@@ -217,20 +217,16 @@ async def check_token(request: Request):
 
 # ---------- Data API ----------
 
+HARDCODED_SUBORGS = [
+    {"suborganizationId": "163560fd-5d5f-483d-9aef-86595e8af28f", "suborganization": {"id": "163560fd-5d5f-483d-9aef-86595e8af28f", "name": "ВД Нальчик", "organizationId": "a7444f40-b450-4824-8c64-e86a069ba720"}},
+    {"suborganizationId": "40f63fed-7beb-48f5-88e5-e49536897a3d", "suborganization": {"id": "40f63fed-7beb-48f5-88e5-e49536897a3d", "name": "ИСиП Нальчик", "organizationId": "a7444f40-b450-4824-8c64-e86a069ba720"}},
+    {"suborganizationId": "9f17b3f8-2e12-4d4d-9797-f568337a34b5", "suborganization": {"id": "9f17b3f8-2e12-4d4d-9797-f568337a34b5", "name": "ИБ Нальчик", "organizationId": "a7444f40-b450-4824-8c64-e86a069ba720"}},
+    {"suborganizationId": "df530b93-977e-478c-bcf2-544c221d1abc", "suborganization": {"id": "df530b93-977e-478c-bcf2-544c221d1abc", "name": "МК Нальчик", "organizationId": "a7444f40-b450-4824-8c64-e86a069ba720"}},
+]
+
 @app.get("/api/suborganizations")
 async def get_suborganizations(token: str = ""):
-    if not token:
-        raise HTTPException(status_code=401, detail="Требуется токен")
-    data = graphql(token, QUERY_GET_ME)
-    items = data["getMe"]["assignedSuborganizations"]
-    seen = set()
-    result = []
-    for item in items:
-        key = item["suborganizationId"]
-        if key not in seen:
-            seen.add(key)
-            result.append(item)
-    return {"items": result}
+    return {"items": HARDCODED_SUBORGS}
 
 
 @app.get("/api/study-periods")
