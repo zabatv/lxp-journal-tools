@@ -504,6 +504,18 @@ async def download_example():
     )
 
 
+@app.get("/api/debug")
+async def debug_student(token: str = "", student_id: str = "", discipline_id: str = "", study_period_id: str = ""):
+    q1 = QUERY_STUDENT_DISCIPLINES.format(student_id=student_id, study_period_id=study_period_id)
+    r1 = graphql(token, q1)
+    q2 = QUERY_USER_GRADE.format(student_id=student_id, disc_id=discipline_id)
+    r2 = graphql(token, q2)
+    return {
+        "searchStudentDisciplines": r1,
+        "getUserById": r2,
+    }
+
+
 if __name__ == "__main__":
     import uvicorn
     port = int(os.environ.get("PORT", 8000))
