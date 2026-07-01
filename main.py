@@ -281,14 +281,18 @@ def _determine_grade(sd: dict) -> str:
     """
     Определяет итоговую оценку по дисциплине.
     
+    2 только при подтверждённом провале (retakeScore < 47).
+    V2=TWO без явной пересдачи → пустая строка (нет данных, а не 2).
+
     Приоритеты:
     1. IN_REVIEW в topics → 3
     2. retakeDisciplineGrade = THREE/FOUR/FIVE → та оценка
     3. retakeScore >= 47 → 3, < 47 → 2
     4. disciplineGrade_V2 = FOUR/FIVE → та оценка
     5. scoreForAnsweredTasks >= 47 → 3
-    6. hasRetake=true, score=0 → auto-pass → 3
-    7. disciplineGrade_V2 / disciplineGrade → fallback
+    6. hasRetake=true, score=0/null → 3 (auto-pass)
+    7. disciplineGrade_V2 / disciplineGrade (только 3+) → 3
+    8. иначе → пустая строка
     """
     topics = sd.get("topics") or []
     if any(t.get("status") == "IN_REVIEW" for t in topics):
@@ -314,27 +318,20 @@ def _determine_grade(sd: dict) -> str:
     v2 = sd.get("disciplineGrade_V2") or ""
     if v2 in ("FOUR", "FIVE"):
         return GRADE_MAP[v2]
-    
+
     score_for_tasks = sd.get("scoreForAnsweredTasks", 0)
     if score_for_tasks is not None and score_for_tasks >= SCORE_THRESHOLD:
         return "3"
-    
+
     if has_retake and (score_for_tasks is None or score_for_tasks == 0):
         return "3"
-    
-    if v2 in GRADE_MAP:
-        return GRADE_MAP[v2]
-    if v2:
-        return str(v2)
-    
-    dg = sd.get("disciplineGrade")
-    if dg is not None:
-        if isinstance(dg, (int, float)):
-            return str(int(dg))
-        if dg in GRADE_MAP:
-            return GRADE_MAP[dg]
-        return str(dg)
-    
+
+    for val in (v2, sd.get("disciplineGrade")):
+        if val in ("THREE", "FOUR", "FIVE"):
+            return GRADE_MAP[val]
+        if isinstance(val, (int, float)) and int(val) >= 3:
+            return str(int(val))
+
     return ""
 
 
