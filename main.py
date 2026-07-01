@@ -283,8 +283,9 @@ def _determine_grade(sd: dict) -> str:
     2. retakeDisciplineGrade = THREE/FOUR/FIVE — retake сдан → та оценка
     3. retakeScore >= 50 — retake сдан → 3
     4. retakeScore < 50 — retake завален → 2
-    5. hasRetake=true, scoreForAnsweredTasks=0 — ничего не делал → auto-pass → 3
-    6. disciplineGrade_V2 / disciplineGrade — оригинальная оценка
+    5. scoreForAnsweredTasks >= 50 — достаточно баллов → 3
+    6. hasRetake=true, scoreForAnsweredTasks=0 — ничего не делал → auto-pass → 3
+    7. disciplineGrade_V2 / disciplineGrade — оригинальная оценка
     """
     topics = sd.get("topics") or []
     if any(t.get("status") == "IN_REVIEW" for t in topics):
@@ -308,6 +309,9 @@ def _determine_grade(sd: dict) -> str:
             pass
     
     score_for_tasks = sd.get("scoreForAnsweredTasks", 0)
+    if score_for_tasks is not None and score_for_tasks >= 50:
+        return "3"
+    
     if has_retake and (score_for_tasks is None or score_for_tasks == 0):
         return "3"
     
