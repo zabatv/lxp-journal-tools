@@ -102,6 +102,7 @@ QUERY_STUDENT_DISCIPLINES = """
             hasRetake
             retakeDisciplineGrade
             retakeScore
+            scoreForAnsweredTasks
             topics {{
                 ... on StudentTopic {{
                     status
@@ -125,6 +126,7 @@ QUERY_USER_GRADE = """
                     hasRetake
                     retakeDisciplineGrade
                     retakeScore
+                    scoreForAnsweredTasks
                     topics {{
                         ... on StudentTopic {{
                             status
@@ -277,50 +279,51 @@ def _determine_grade(sd: dict) -> str:
     Определяет итоговую оценку по дисциплине.
     
     Приоритеты:
-    1. Если есть пересдача (hasRetake=True) и есть retakeDisciplineGrade - используем её
-    2. Если есть пересдача и retakeScore >= 50 - возвращаем "3"
-    3. Если есть пересдача и retakeScore < 50 - возвращаем "2"
-    4. Если нет пересдачи - используем disciplineGrade_V2
+    1. IN_REVIEW в topics — retake на проверке → 3
+    2. retakeDisciplineGrade = THREE/FOUR/FIVE — retake сдан → та оценка
+    3. retakeScore >= 50 — retake сдан → 3
+    4. retakeScore < 50 — retake завален → 2
+    5. hasRetake=true, scoreForAnsweredTasks=0 — ничего не делал → auto-pass → 3
+    6. disciplineGrade_V2 / disciplineGrade — оригинальная оценка
     """
+    topics = sd.get("topics") or []
+    if any(t.get("status") == "IN_REVIEW" for t in topics):
+        return "3"
+    
     has_retake = sd.get("hasRetake", False)
-    discipline_grade_v2 = sd.get("disciplineGrade_V2") or ""
-    retake_discipline_grade = sd.get("retakeDisciplineGrade") or ""
+    retake_grade = sd.get("retakeDisciplineGrade") or ""
     retake_score = sd.get("retakeScore")
     
-    # 1. Если есть пересдача И оценка за пересдачу
-    if has_retake and retake_discipline_grade:
-        if retake_discipline_grade in GRADE_MAP:
-            return GRADE_MAP[retake_discipline_grade]
-        elif retake_discipline_grade.isdigit():
-            return retake_discipline_grade
-        else:
-            return retake_discipline_grade
+    if has_retake and retake_grade:
+        if retake_grade in GRADE_MAP and retake_grade != "TWO":
+            return GRADE_MAP[retake_grade]
     
-    # 2. Если есть пересдача И баллы за пересдачу
     if has_retake and retake_score is not None:
         try:
-            score = float(retake_score)
-            if score >= 50:
+            if float(retake_score) >= 50:
                 return "3"
             else:
                 return "2"
         except (ValueError, TypeError):
             pass
     
-    # 3. Нет пересдачи или нет данных о пересдаче - берем grade_v2
-    if discipline_grade_v2 in GRADE_MAP:
-        return GRADE_MAP[discipline_grade_v2]
-    elif discipline_grade_v2:
-        return str(discipline_grade_v2)
+    score_for_tasks = sd.get("scoreForAnsweredTasks", 0)
+    if has_retake and (score_for_tasks is None or score_for_tasks == 0):
+        return "3"
     
-    # 4. Если grade_v2 нет - пробуем disciplineGrade
-    discipline_grade = sd.get("disciplineGrade")
-    if discipline_grade is not None:
-        if isinstance(discipline_grade, (int, float)):
-            return str(int(discipline_grade))
-        if discipline_grade in GRADE_MAP:
-            return GRADE_MAP[discipline_grade]
-        return str(discipline_grade)
+    v2 = sd.get("disciplineGrade_V2") or ""
+    if v2 in GRADE_MAP:
+        return GRADE_MAP[v2]
+    if v2:
+        return str(v2)
+    
+    dg = sd.get("disciplineGrade")
+    if dg is not None:
+        if isinstance(dg, (int, float)):
+            return str(int(dg))
+        if dg in GRADE_MAP:
+            return GRADE_MAP[dg]
+        return str(dg)
     
     return ""
 
