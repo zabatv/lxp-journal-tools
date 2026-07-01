@@ -74,11 +74,16 @@ td.grade { text-align: center; font-weight: 600; width: 60px; }
       <div class="export-tab" data-tab="excel" onclick="switchExportTab('excel')">Excel</div>
     </div>
     <div id="exportTabDocx">
-      <div class="card-title">DOCX файл</div>
       <div class="row">
         <div class="field" style="flex:2">
           <input type="file" id="fileInput" accept=".docx">
           <div class="file-info" id="fileInfo">Файл не выбран</div>
+        </div>
+        <div class="actions" style="margin-top:4px">
+          <button class="btn btn-accent" id="fillBtn" onclick="fillDocx()" disabled>Заполнить DOCX</button>
+          <label style="font-size:13px;display:flex;align-items:center;gap:6px;cursor:pointer">
+            <input type="checkbox" id="openCheck" checked> Скачать после сохранения
+          </label>
         </div>
       </div>
     </div>
@@ -118,10 +123,6 @@ td.grade { text-align: center; font-weight: 600; width: 60px; }
   <div class="card">
     <div class="actions">
       <button class="btn btn-primary" id="loadBtn" onclick="loadStudents()">Загрузить</button>
-      <button class="btn btn-accent" id="fillBtn" onclick="fillDocx()" disabled>Заполнить DOCX</button>
-      <label style="font-size:13px;display:flex;align-items:center;gap:6px;cursor:pointer;margin-left:8px">
-        <input type="checkbox" id="openCheck" checked> Скачать после сохранения
-      </label>
       <span class="status-bar" id="statusBar">Готов</span>
     </div>
   </div>
