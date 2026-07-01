@@ -100,6 +100,8 @@ QUERY_STUDENT_DISCIPLINES = """
             disciplineGrade
             disciplineGrade_V2
             hasRetake
+            retakeDisciplineGrade
+            retakeScore
             topics {{
                 ... on StudentTopic {{
                     status
@@ -121,6 +123,8 @@ QUERY_USER_GRADE = """
                     disciplineGrade
                     disciplineGrade_V2
                     hasRetake
+                    retakeDisciplineGrade
+                    retakeScore
                     topics {{
                         ... on StudentTopic {{
                             status
@@ -269,32 +273,17 @@ async def get_disciplines(token: str = "", group_id: str = ""):
 
 
 def _determine_grade(sd: dict) -> str:
-    """
-    Логика определения оценки:
-    - Если есть FAILED темы + hasRetake: False → не сдал → "2"
-    - Если есть FAILED темы + hasRetake: True → пересдал → максимум "3"
-    - Если нет FAILED тем → обычная оценка из API (3, 4, 5)
-    """
-    topics = sd.get("topics") or []
-    has_failed = any(t.get("status") == "FAILED" for t in topics)
-    has_retake = sd.get("hasRetake", False)
-    
-    # Если есть проваленные темы
-    if has_failed:
-        if has_retake:
-            # Пересдал — максимум 3
-            return "3"
-        else:
-            # Не пересдал — 2
-            return "2"
-    
-    # Нет проваленных тем — берём обычную оценку
     grade_v2 = sd.get("disciplineGrade_V2") or sd.get("disciplineGrade") or ""
+    has_retake = sd.get("hasRetake", False)
+    retake_grade = sd.get("retakeDisciplineGrade", "")
+
+    if has_retake and retake_grade in GRADE_MAP:
+        return GRADE_MAP[retake_grade]
+
     if grade_v2 in GRADE_MAP:
         return GRADE_MAP[grade_v2]
-    elif grade_v2:
-        return grade_v2
-    
+    if grade_v2:
+        return str(grade_v2)
     return ""
 
 
@@ -327,6 +316,9 @@ async def get_students(token: str = "", group_id: str = "", disc_id: str = "", s
             "id": student_id,
             "name": name_map.get(student_id, "Ошибка"),
             "grade": "",
+            "hasRetake": False,
+            "retakeGrade": "",
+            "retakeScore": "",
             "idx": idx,
         }
         try:
@@ -336,6 +328,9 @@ async def get_students(token: str = "", group_id: str = "", disc_id: str = "", s
                 for sd in sd_data["searchStudentDisciplines"]:
                     if sd["disciplineId"] == disc_id:
                         base["grade"] = _determine_grade(sd)
+                        base["hasRetake"] = sd.get("hasRetake", False)
+                        base["retakeGrade"] = sd.get("retakeDisciplineGrade", "")
+                        base["retakeScore"] = sd.get("retakeScore", "")
                         break
             else:
                 query4 = QUERY_USER_GRADE.format(student_id=student_id, disc_id=disc_id)
@@ -343,6 +338,9 @@ async def get_students(token: str = "", group_id: str = "", disc_id: str = "", s
                 sd = gdata["getUserById"]["student"]["studentDiscipline"]
                 if sd:
                     base["grade"] = _determine_grade(sd)
+                    base["hasRetake"] = sd.get("hasRetake", False)
+                    base["retakeGrade"] = sd.get("retakeDisciplineGrade", "")
+                    base["retakeScore"] = sd.get("retakeScore", "")
         except Exception as e:
             logger.error(f"Error fetching grade for student {student_id}: {e}")
         return base
