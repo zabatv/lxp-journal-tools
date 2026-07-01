@@ -6,6 +6,7 @@
 <title>LXP Journal Filler</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
 
 <style>
 * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -371,24 +372,39 @@ async function exportAllXlsx() {
   const gid = document.getElementById('groupSelect').value;
   const spId = document.getElementById('semesterSelect').value;
   if (!gid || !spId) { setStatus('Выберите группу', 'error'); return; }
+  const disciplines = Object.entries(discDataMap);
+  if (!disciplines.length) { setStatus('Нет дисциплин', 'error'); return; }
+
   const btn = document.getElementById('exportXlsxBtn');
   const status = document.getElementById('xlsxStatus');
   btn.disabled = true;
-  status.textContent = 'Генерация...';
-  try {
-    const r = await fetch(`/api/export/xlsx?group_id=${encodeURIComponent(gid)}&study_period_id=${encodeURIComponent(spId)}&token=${encodeURIComponent(token)}`);
-    if (!r.ok) throw new Error(((await r.json().catch(() => ({}))).detail) || `HTTP ${r.status}`);
-    const blob = await r.blob();
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'export.xlsx';
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-    status.textContent = 'Готово';
-  } catch (e) { status.textContent = 'Ошибка: ' + e.message; }
+
+  const wb = XLSX.utils.book_new();
+  let loaded = 0;
+
+  for (const [did, disc] of disciplines) {
+    status.textContent = `Загружено ${loaded}/${disciplines.length}: ${disc.name}`;
+    try {
+      const r = await fetch(`/api/students?group_id=${encodeURIComponent(gid)}&disc_id=${encodeURIComponent(did)}&study_period_id=${encodeURIComponent(spId)}&token=${encodeURIComponent(token)}`);
+      if (!r.ok) continue;
+      const data = await r.json();
+      const cleanName = disc.name.replace(/[\\/*?:"<>|\[\]]/g, '_').slice(0, 31);
+      const rows = [['№', 'Фамилия', 'Имя', 'Отчество', 'Оценка']];
+      data.items.forEach(s => {
+        const parts = s.name.split(' ');
+        rows.push([s.idx + 1, parts[0] || '', parts[1] || '', parts.slice(2).join(' ') || '', s.grade || '']);
+      });
+      const ws = XLSX.utils.aoa_to_sheet(rows);
+      XLSX.utils.book_append_sheet(wb, ws, cleanName || 'Sheet');
+      loaded++;
+    } catch (e) {
+      console.error(`Error loading ${disc.name}:`, e);
+    }
+  }
+
+  status.textContent = `Сборка XLSX (${loaded}/${disciplines.length})...`;
+  XLSX.writeFile(wb, 'export.xlsx');
+  status.textContent = `Готово: ${loaded}/${disciplines.length} дисциплин`;
   btn.disabled = false;
 }
 
