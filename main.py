@@ -178,7 +178,12 @@ async def index(request: Request):
 
 @app.get("/dashboard", response_class=HTMLResponse)
 async def dashboard(request: Request):
-    return templates.TemplateResponse("dashboard.html", {"request": request})
+    from fastapi.responses import HTMLResponse as FastAPIHTMLResponse
+    resp = templates.TemplateResponse("dashboard.html", {"request": request})
+    resp.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+    resp.headers["Pragma"] = "no-cache"
+    resp.headers["Expires"] = "0"
+    return resp
 
 
 # ---------- Auth ----------
@@ -396,6 +401,7 @@ async def get_students(token: str = "", group_id: str = "", disc_id: str = "", s
         return base
 
     results = []
+    logger.info(f"Fetching grades for {len(students)} students, disc={disc_id[:8]}...")
     with ThreadPoolExecutor(max_workers=10) as executor:
         futures = {executor.submit(get_grade, s["id"], i): s for i, s in enumerate(students)}
         for future in as_completed(futures):
@@ -411,6 +417,10 @@ async def get_students(token: str = "", group_id: str = "", disc_id: str = "", s
                     "idx": i,
                 })
     results.sort(key=lambda x: x["idx"])
+
+    for s in results:
+        logger.info(f"  {s['name']}: grade={s['grade']} hasRetake={s['hasRetake']} retake={s['retakeGrade']}")
+    logger.info(f"Done: {len(results)} students")
 
     return {"items": results, "teacher_name": teacher_name, "count": len(results)}
 
