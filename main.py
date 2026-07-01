@@ -509,6 +509,78 @@ async def download_example():
     )
 
 
+@app.get("/api/export/xlsx")
+async def export_xlsx(token: str = "", group_id: str = "", study_period_id: str = ""):
+    if not token:
+        raise HTTPException(status_code=401, detail="Требуется токен")
+
+    query1 = QUERY_STUDENTS.format(group_id=group_id)
+    students_data = graphql(token, query1)
+    students = students_data["searchStudentsInLearningGroup"]["items"]
+
+    name_map = {
+        s["id"]: f"{s['user']['lastName']} {s['user']['firstName']} {s['user'].get('middleName', '')}".strip()
+        for s in students
+    }
+
+    query2 = QUERY_DISCIPLINES.format(group_id=group_id)
+    disc_data = graphql(token, query2)
+    disciplines = disc_data["disciplinesByGroups"]
+
+    import openpyxl
+    wb = openpyxl.Workbook()
+    wb.remove(wb.active)
+
+    def sheet_name(name: str) -> str:
+        clean = "".join(c for c in name if c.isalnum() or c in " _-")
+        return clean[:31] or "Sheet"
+
+    for disc in disciplines:
+        disc_id = disc["id"]
+        disc_name = disc["name"]
+        ws = wb.create_sheet(title=sheet_name(disc_name))
+        ws.append(["№", "Фамилия", "Имя", "Отчество", "Оценка"])
+
+        rows = []
+        for s in students:
+            try:
+                if study_period_id:
+                    q3 = QUERY_STUDENT_DISCIPLINES.format(student_id=s["id"], study_period_id=study_period_id)
+                    sd_data = graphql(token, q3)
+                    grade = ""
+                    for sd in sd_data["searchStudentDisciplines"]:
+                        if sd["disciplineId"] == disc_id:
+                            grade = _determine_grade(sd)
+                            break
+                else:
+                    q4 = QUERY_USER_GRADE.format(student_id=s["id"], disc_id=disc_id)
+                    gdata = graphql(token, q4)
+                    sd = gdata["getUserById"]["student"]["studentDiscipline"]
+                    grade = _determine_grade(sd) if sd else ""
+            except Exception:
+                grade = ""
+
+            parts = name_map.get(s["id"], "Ошибка").split(" ")
+            rows.append([len(rows) + 1, parts[0] or "", parts[1] or "", " ".join(parts[2:]) or "", grade])
+
+        for row in rows:
+            ws.append(row)
+
+        for col in ws.columns:
+            max_len = max((len(str(c.value or "")) for c in col), default=0)
+            ws.column_dimensions[col[0].column_letter].width = min(max_len + 3, 40)
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+
+    return Response(
+        content=buf.getvalue(),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": "attachment; filename=export.xlsx"},
+    )
+
+
 @app.get("/api/debug")
 async def debug_student(token: str = "", student_id: str = "", discipline_id: str = "", study_period_id: str = ""):
     q1 = QUERY_STUDENT_DISCIPLINES.format(student_id=student_id, study_period_id=study_period_id)
