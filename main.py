@@ -280,12 +280,13 @@ def _determine_grade(sd: dict) -> str:
     
     Приоритеты:
     1. IN_REVIEW в topics — retake на проверке → 3
-    2. retakeDisciplineGrade = THREE/FOUR/FIVE — retake сдан → та оценка
-    3. retakeScore >= 50 — retake сдан → 3
-    4. retakeScore < 50 — retake завален → 2
-    5. scoreForAnsweredTasks >= 50 — достаточно баллов → 3
-    6. hasRetake=true, scoreForAnsweredTasks=0 — ничего не делал → auto-pass → 3
-    7. disciplineGrade_V2 / disciplineGrade — оригинальная оценка
+    2. hasRetake=true, retakeScore=null — retake не оценён → 3
+    3. retakeDisciplineGrade = THREE/FOUR/FIVE — retake сдан → та оценка
+    4. retakeScore >= 50 — retake сдан → 3
+    5. retakeScore < 50 — retake завален → 2
+    6. scoreForAnsweredTasks >= 50 — достаточно баллов → 3
+    7. hasRetake=true, scoreForAnsweredTasks=0 — ничего не делал → auto-pass → 3
+    8. disciplineGrade_V2 / disciplineGrade — оригинальная оценка
     """
     topics = sd.get("topics") or []
     if any(t.get("status") == "IN_REVIEW" for t in topics):
@@ -294,6 +295,9 @@ def _determine_grade(sd: dict) -> str:
     has_retake = sd.get("hasRetake", False)
     retake_grade = sd.get("retakeDisciplineGrade") or ""
     retake_score = sd.get("retakeScore")
+    
+    if has_retake and retake_score is None:
+        return "3"
     
     if has_retake and retake_grade:
         if retake_grade in GRADE_MAP and retake_grade != "TWO":
