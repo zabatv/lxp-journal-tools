@@ -281,13 +281,13 @@ def _determine_grade(sd: dict) -> str:
     Определяет итоговую оценку по дисциплине.
     
     Приоритеты:
-    1. IN_REVIEW в topics — retake на проверке → 3
-    2. retakeDisciplineGrade = THREE/FOUR/FIVE — retake сдан → та оценка
-    3. retakeScore >= 47 — retake сдан → 3
-    4. retakeScore < 47 — retake завален → 2
-    5. scoreForAnsweredTasks >= 47 — достаточно баллов → 3
-    6. hasRetake=true, scoreForAnsweredTasks=0 — ничего не делал → auto-pass → 3
-    7. disciplineGrade_V2 / disciplineGrade — оригинальная оценка
+    1. IN_REVIEW в topics → 3
+    2. retakeDisciplineGrade = THREE/FOUR/FIVE → та оценка
+    3. retakeScore >= 47 → 3, < 47 → 2
+    4. disciplineGrade_V2 = FOUR/FIVE → та оценка
+    5. scoreForAnsweredTasks >= 47 → 3
+    6. hasRetake=true, score=0 → auto-pass → 3
+    7. disciplineGrade_V2 / disciplineGrade → fallback
     """
     topics = sd.get("topics") or []
     if any(t.get("status") == "IN_REVIEW" for t in topics):
@@ -310,6 +310,10 @@ def _determine_grade(sd: dict) -> str:
         except (ValueError, TypeError):
             pass
     
+    v2 = sd.get("disciplineGrade_V2") or ""
+    if v2 in ("FOUR", "FIVE"):
+        return GRADE_MAP[v2]
+    
     score_for_tasks = sd.get("scoreForAnsweredTasks", 0)
     if score_for_tasks is not None and score_for_tasks >= SCORE_THRESHOLD:
         return "3"
@@ -317,7 +321,6 @@ def _determine_grade(sd: dict) -> str:
     if has_retake and (score_for_tasks is None or score_for_tasks == 0):
         return "3"
     
-    v2 = sd.get("disciplineGrade_V2") or ""
     if v2 in GRADE_MAP:
         return GRADE_MAP[v2]
     if v2:
